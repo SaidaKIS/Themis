@@ -58,6 +58,15 @@ for i, img in enumerate(raw_cube_sci[:12]):
     corr_img = flat_dark_corr(img, raw_cube_flats, raw_cube_darks)
     raw_cube_sci_l1[i] = corr_img
 
+plt.imshow(raw_cube_sci_l1[0], origin='lower', cmap='gray')
+plt.show
+
+fig, ax = plt.subplots(nrows=2, ncols=3, sharex=True, sharey=True)
+ax_p = ax.flatten()
+for i, a in enumerate(ax_p):
+    a.plot(raw_cube_sci_l1[i,200,:])
+    plt.show()
+
 #----------------------STOKES PARAMETERS----------------------
 seq_stk = header["SEQ_STOK"].split(" ")
 nsew_stk = len(seq_stk)
@@ -88,17 +97,17 @@ for s in range(scans):
     for i, a in enumerate(ax_p):
         a.plot(I[i][200,:])
     plt.show()
-
-    Q = [np.abs((p_stkQ[0][:header["NAXIS2"]//2, :] - p_stkQ[0][header["NAXIS2"]//2:, :])/2),
-         np.abs((p_stkQ[1][:header["NAXIS2"]//2, :] - p_stkQ[1][header["NAXIS2"]//2:, :])/2)]
-    
-    U = [np.abs((p_stkU[0][:header["NAXIS2"]//2, :] - p_stkU[0][header["NAXIS2"]//2:, :])/2),
-         np.abs((p_stkU[1][:header["NAXIS2"]//2, :] - p_stkU[1][header["NAXIS2"]//2:, :])/2)]
-    
-    V = [np.abs((p_stkV[0][:header["NAXIS2"]//2, :] - p_stkV[0][header["NAXIS2"]//2:, :])/2),
-         np.abs((p_stkV[1][:header["NAXIS2"]//2, :] - p_stkV[1][header["NAXIS2"]//2:, :])/2)]
-
-    sys.exit()
+#
+    #Q = [np.abs((p_stkQ[0][:header["NAXIS2"]//2, :] - p_stkQ[0][header["NAXIS2"]//2:, :])/2),
+    #     np.abs((p_stkQ[1][:header["NAXIS2"]//2, :] - p_stkQ[1][header["NAXIS2"]//2:, :])/2)]
+    #
+    #U = [np.abs((p_stkU[0][:header["NAXIS2"]//2, :] - p_stkU[0][header["NAXIS2"]//2:, :])/2),
+    #     np.abs((p_stkU[1][:header["NAXIS2"]//2, :] - p_stkU[1][header["NAXIS2"]//2:, :])/2)]
+    #
+    #V = [np.abs((p_stkV[0][:header["NAXIS2"]//2, :] - p_stkV[0][header["NAXIS2"]//2:, :])/2),
+    #     np.abs((p_stkV[1][:header["NAXIS2"]//2, :] - p_stkV[1][header["NAXIS2"]//2:, :])/2)]
+#
+    #sys.exit()
 
 
 #ToDos - scatter plots Intensity cutting edges - ask Bernard for the matlab code
