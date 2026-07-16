@@ -13,18 +13,30 @@ from skimage.transform import warp, AffineTransform
 from scipy.optimize import minimize_scalar
 from scipy.ndimage import map_coordinates
 from interative_get_roi import get_roi
+from scipy.optimize import curve_fit
 
-#------Basic procedure: Raw Data -> Dark Subtraction -> De-curving (Straightening) NOT CONSIDERED FOR NOW-> Flat-Field Division -> Affine Beam Alignment -> Stokes Demodulation
+#------Basic procedure: Raw Data -> Dark Subtraction -> 
+#      De-curving (Straightening) -> Flat-Field Division -> Affine Beam Alignment 
+#      -> Stokes Demodulation
 
+# Conclusion based on the analysis of the flat-field images: 
+# The dual-beam MTR2 system has a slight misalignment between the two beams, 
+# which can be corrected using an affine transformation. Additionally, 
+# the spectral lines exhibit curvature that can be straightened using polynomial fitting. 
+# measuring the diference between the flat images in both beams the distribution of the residuals is centered around zero (62) 
+# with a standard deviation of ~700 counts,
+# The gain factor 's' between the two beams is also determined to ensure accurate Stokes parameter extraction.
 
 def maping_coord(image, poly_coefficients, fixed_x_target, order=1, mode='nearest'):
 
     height, width = image.shape
     straightened_image = np.zeros_like(image)
+    line_x = []
 
     for y in range(height):
         # Find out where the curve thinks the line core is at this specific row
         current_line_x = np.polyval(poly_coefficients, y)
+        line_x.append(current_line_x)
         
         # Calculate the sub-pixel shift required to pull it to the target column
         dx = current_line_x - fixed_x_target
@@ -47,9 +59,11 @@ def maping_coord(image, poly_coefficients, fixed_x_target, order=1, mode='neares
             order=order, 
             mode=mode
         )
-    return straightened_image
 
-def straighten_spectral_lines(image, line_center_col, ymin, ymax, search_window=4):
+
+    return straightened_image, np.array(line_x)
+
+def straighten_spectral_lines(image, line_center_col, ymin, ymax, search_window=20):
     """
     Tracks a curved spectral line along the row axis (Y), fits a 2nd-order 
     polynomial, and straightens the entire image based on that curve.
@@ -71,24 +85,28 @@ def straighten_spectral_lines(image, line_center_col, ymin, ymax, search_window=
         detected_x.append(actual_x)
         
     # Step 2: Fit a 2nd-degree polynomial (x = a*y^2 + b*y + c) to the curve
-    poly_coefficients = np.polyfit(y_indices, detected_x, deg=1)
+    poly_coefficients = np.polyfit(y_indices, detected_x, deg=2)
 
     # Step 3: Create a destination coordinate map for the un-warping process
     # We want to shift every pixel horizontally so the line becomes perfectly vertical
 
-    straightened_image = maping_coord(image, poly_coefficients, line_center_col, order=1, mode='nearest')
+    straightened_image, fitted_line = maping_coord(image, poly_coefficients, line_center_col, order=1, mode='nearest')
     
-    return straightened_image, poly_coefficients
+    return straightened_image, poly_coefficients, fitted_line
 
-def compute_calibration(flat_filepath, dark_filepath=None):
+def compute_calibration(flat_filepath, dark_filepath=None, plot_check=False):
     """
     Reads flat-field, applies dark subtraction if available, splits the dual 
     beams, computes sub-pixel alignment, and finds the intensity scale factor 's'.
     """
     # Load the flat-field FITS image
     with fits.open(flat_filepath) as hdul:
-        flat_data = hdul[0].data.astype(float)
+        data_raw = hdul[0].data
         flat_header = hdul[0].header
+        # Convert raw data to signed integers and then to float for processing - Correct way for reading MATLAB fits
+        data_sign = np.asanyarray(data_raw).view(np.int16).astype(np.float64)
+        flat_data = data_sign + flat_header.get('BZERO', 0)  # Apply BZERO offset if present
+    
     if flat_data.ndim == 3:
         flat_data = np.mean(flat_data, axis=0) # Average frames if it's a cube
         
@@ -97,8 +115,11 @@ def compute_calibration(flat_filepath, dark_filepath=None):
     if dark_filepath:
         print(f"Applying dark frame correction to flat-field using: {dark_filepath}")
         with fits.open(dark_filepath) as hdul:
-            dark_data = hdul[0].data.astype(float)
+            data_raw = hdul[0].data
             dark_header = hdul[0].header
+            # Convert raw data to signed integers and then to float for processing - Correct way for reading MATLAB fits
+            data_sign = np.asanyarray(data_raw).view(np.int16).astype(np.float64)
+            dark_data = data_sign + dark_header.get('BZERO', 0)  # Apply BZERO offset if present
         if dark_data.ndim == 3:
             dark_data = np.mean(dark_data, axis=0)
         
@@ -115,26 +136,71 @@ def compute_calibration(flat_filepath, dark_filepath=None):
     b1_flat = flat_data[0:half_y, :]
     b2_flat = flat_data[half_y:, :]
 
-    # Compute the the polynomial De-curving NOT CONSIDERED FOR NOW
-    #b1_flat_straight, poly_coeffs_b1 = straighten_spectral_lines(b1_flat, line_center_col=config_roi['line_center_b1'], ymin=config_roi['lrg1'][0], ymax=config_roi['lrg1'][1])   
-    #b2_flat_straight, poly_coeffs_b2 = straighten_spectral_lines(b2_flat, line_center_col=config_roi['line_center_b2'], ymin=config_roi['lrg2'][0], ymax=config_roi['lrg2'][1]) 
+    # Compute the the polynomial De-curving debugging
+    b1_flat_straight, poly_coeffs_b1, fitted_line_b1 = straighten_spectral_lines(b1_flat, line_center_col=config_roi['line_center_b1'], ymin=config_roi['lrg1'][0], ymax=config_roi['lrg1'][1])   
+    b2_flat_straight, poly_coeffs_b2, fitted_line_b2 = straighten_spectral_lines(b2_flat, line_center_col=config_roi['line_center_b2'], ymin=config_roi['lrg2'][0], ymax=config_roi['lrg2'][1])   
+    
+    # Checking the differnce between b1_flat and b1_flat_straight and plot it 
+    diff_b1 = b1_flat - b1_flat_straight
+    diff_b2 = b2_flat - b2_flat_straight
+
+    if plot_check == True:
+    
+        plt.ioff()
+        fig, ax = plt.subplots(nrows=2, ncols=3, figsize=(15, 5), sharex=True, sharey=True)
+        ax[0][0].tick_params(bottom=True, top=True, left=True, right=False)
+        ax[0][1].tick_params(bottom=True, top=True, left=True, right=False)
+        ax[0][2].tick_params(bottom=True, top=True, left=True, right=False)
+        ax[0][0].tick_params(labelbottom=True, labeltop=True, labelleft=True, labelright=False)
+        ax[0][1].tick_params(labelbottom=True, labeltop=True, labelleft=True, labelright=False)
+        ax[0][2].tick_params(labelbottom=True, labeltop=True, labelleft=True, labelright=False)
+        ax[1][0].tick_params(bottom=True, top=True, left=True, right=False)
+        ax[1][1].tick_params(bottom=True, top=True, left=True, right=False)
+        ax[1][2].tick_params(bottom=True, top=True, left=True, right=False)
+        ax[1][0].tick_params(labelbottom=True, labeltop=True, labelleft=True, labelright=False)
+        ax[1][1].tick_params(labelbottom=True, labeltop=True, labelleft=True, labelright=False)
+        ax[1][2].tick_params(labelbottom=True, labeltop=True, labelleft=True, labelright=False)
+        ax[0][0].imshow(b1_flat, cmap='gray', origin='lower')
+        ax[0][0].plot(fitted_line_b1, np.arange(half_y), color='red', linewidth=1.5, label='Fitted Curve')
+        ax[0][0].set_title("Beam 1 Flat")
+        ax[0][1].imshow(b1_flat_straight, cmap='gray', origin='lower')
+        ax[0][1].set_title("Beam 1 Straightened")
+        im = ax[0][2].imshow(diff_b1, cmap='bwr', origin='lower')
+        ax[0][2].set_title("Residual Difference (b1 - b1_straight)")
+        plt.colorbar(im, ax=ax[0][2], fraction=0.046, pad=0.04)
+
+        ax[1][0].imshow(b2_flat, cmap='gray', origin='lower')
+        ax[1][0].plot(fitted_line_b2, np.arange(half_y), color='red', linewidth=1.5, label='Fitted Curve')
+        ax[1][0].set_title("Beam 2 Flat")
+        ax[1][1].imshow(b2_flat_straight, cmap='gray', origin='lower')
+        ax[1][1].set_title("Beam 2 Straightened")
+        im = ax[1][2].imshow(diff_b2, cmap='bwr', origin='lower')
+        ax[1][2].set_title("Residual Difference (b2 - b2_straight)")
+        plt.colorbar(im, ax=ax[1][2], fraction=0.046, pad=0.04)
+        plt.tight_layout()
+        plt.show() 
+
+    print(f"--- Beam 1 Straightening ---")
+    print(f"Polynomial Coefficients for Beam 1: {poly_coeffs_b1}\n")    
+    print(f"--- Beam 2 Straightening ---")
+    print(f"Polynomial Coefficients for Beam 2: {poly_coeffs_b2}\n")    
 
     #This measures the exact shift needed to register b2 (moving) onto b1 (reference).
     # upsample_factor=100 enables ultra-precise 0.01 sub-pixel registration.
     shift, error, diffphase = phase_cross_correlation(
-        b2_flat, 
-        b1_flat, 
+        b2_flat_straight, 
+        b1_flat_straight, 
         upsample_factor=100
     )
     shift_y, shift_x = shift[0], shift[1]
 
     tform = AffineTransform(translation=(shift_x, shift_y))
 
-    b2_flat_reg = warp(b2_flat, tform, order=1)
+    b2_flat_reg = warp(b2_flat_straight, tform, order=1)
     
     # Find scale factor 's' by minimizing intensity variance between channels
     def loss_function(s):
-        diff = b1_flat - s * b2_flat_reg
+        diff = b1_flat_straight - s * b2_flat_reg
         return np.std(diff)
 
     # from scal=fminbnd(@(s) std(mean(f1R(:,c1wrg)-s*f2R(:,c1wrg),1)),0.5,1.5); in get_tform.m
@@ -145,7 +211,98 @@ def compute_calibration(flat_filepath, dark_filepath=None):
     print(f"Measured Alignment Shift -> X: {shift_x:.3f}px, Y: {shift_y:.3f}px")
     print(f"Calculated Gain Scale Factor (s): {s_factor:.4f}\n")
 
-    return tform, s_factor, config_roi
+    return tform, s_factor, config_roi, poly_coeffs_b1, poly_coeffs_b2
+
+def process_flats_eval(flat_filepath, tform, s_factor, poly_coeffs_b1=None, 
+                        poly_coeffs_b2=None, config_roi=None, dark_filepath=None):
+    """
+    Evaluates the flat-field calibration by applying dark subtraction, 
+    mapping alignment, normalizing gain, and computing the residuals.
+    """
+    with fits.open(flat_filepath) as hdul:
+        data_raw = hdul[0].data
+        flat_header = hdul[0].header
+        # Convert raw data to signed integers and then to float for processing - Correct way for reading MATLAB fits
+        data_sign = np.asanyarray(data_raw).view(np.int16).astype(np.float64)
+        flat_data = data_sign + flat_header.get('BZERO', 0)  # Apply BZERO offset if present
+        
+    if flat_data.ndim == 3:
+        flat_data = np.mean(flat_data, axis=0) # Average frames if it's a cube
+        
+    # --- CRITICAL STEP: DARK CORRECTION (Performed first) ---
+
+    if dark_filepath:
+        print(f"Applying dark frame correction to flat-field using: {dark_filepath}")
+        with fits.open(dark_filepath) as hdul:
+            data_raw = hdul[0].data
+            dark_header = hdul[0].header
+            # Convert raw data to signed integers and then to float for processing - Correct way for reading MATLAB fits
+            data_sign = np.asanyarray(data_raw).view(np.int16).astype(np.float64)
+            dark_data = data_sign + dark_header.get('BZERO', 0)  # Apply BZERO offset if present
+        if dark_data.ndim == 3:
+            dark_data = np.mean(dark_data, axis=0)
+            
+        flat_data = flat_data - dark_data
+        
+    height, width = flat_data.shape
+    half_y = height // 2
+
+    b1_flat = flat_data[0:half_y, :]
+    b2_flat = flat_data[half_y:, :]
+
+    # Apply polynomial straightening if coefficients are provided
+    if poly_coeffs_b1 is not None and poly_coeffs_b2 is not None and config_roi is not None:
+        b1_flat,_ = maping_coord(b1_flat, poly_coeffs_b1, config_roi['line_center_b1'], order=1, mode='nearest')
+        b2_flat,_ = maping_coord(b2_flat, poly_coeffs_b2, config_roi['line_center_b2'], order=1, mode='nearest')
+
+    # Warp beam 2 coordinates onto beam 1 coordinates
+    b2_flat_reg = warp(b2_flat, tform, order=1)
+
+    # Compute the residual difference after alignment and scaling
+    residual_diff = b1_flat - s_factor * b2_flat_reg
+
+    plt.ioff()
+    fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(15, 5))
+    ax[0].imshow(b1_flat, cmap='gray', origin='lower')
+    ax[0].set_title("Beam 1 Flat")
+    
+    ax[1].imshow(b2_flat_reg, cmap='gray', origin='lower')
+    ax[1].set_title("Beam 2 Flat (Registered)")
+    
+    im = ax[2].imshow(residual_diff, cmap='bwr', origin='lower', vmin=-10000, vmax=10000)
+    ax[2].set_title("Residual Difference (b1 - s*b2)")
+    plt.colorbar(im, ax=ax[2], fraction=0.046, pad=0.04)
+    plt.tight_layout()
+    plt.show()    
+
+    n, bins, patches = plt.hist(residual_diff.flatten(), bins=200, color='gray', alpha=0.7)
+
+    bin_centers = (bins[:-1] + bins[1:]) / 2
+
+    def funcion_gaussiana(x, amp, mean, sigma):
+        return amp * np.exp(-(x - mean)**2 / (2 * sigma**2))
+
+    p0 = [max(n), np.mean(residual_diff.flatten()), np.std(residual_diff.flatten())]
+
+    popt, pcov = curve_fit(funcion_gaussiana, bin_centers, n, p0=p0)
+
+    x_curva = np.linspace(min(bins), max(bins), 100)
+    y_curva = funcion_gaussiana(x_curva, *popt)
+
+    # Print gaussian fit parameters
+    print(f"Gaussian Fit Parameters:")
+    print(f"Amplitude: {popt[0]:.2f}")
+    print(f"Mean: {popt[1]:.2f}")
+    print(f"Sigma: {popt[2]:.2f}") 
+
+    plt.plot(x_curva, y_curva, 'r-', linewidth=2, label=f'Ajuste Gaussiano\n$\mu={popt[1]:.2f}, \sigma={popt[2]:.2f}$')
+
+    plt.title('Histogram of Residual Differences and Gaussian Fit')
+    plt.title("")
+    plt.xlabel("Residual Intensity")
+    plt.ylabel("Frequency")
+    plt.grid(True)
+    plt.show()  
 
 def process_science_data(science_filepath, tform, s_factor, poly_coeffs_b1=None, 
                         poly_coeffs_b2=None, config_roi=None, dark_filepath=None):
@@ -155,13 +312,28 @@ def process_science_data(science_filepath, tform, s_factor, poly_coeffs_b1=None,
     """
     with fits.open(science_filepath) as hdul:
         header = hdul[0].header
-        raw_data = hdul[0].data.astype(float) # Shape: (frames, height, width)
+        data_raw = hdul[0].data
+        # Convert raw data to signed integers and then to float for processing - Correct way for reading MATLAB fits
+        raw_data = np.asanyarray(hdul[0].data).view(np.int16).astype(np.float32)
+    
+        # 2. Apply BZERO in-place using '+=' so a new array copy isn't created
+        bzero = header.get('BZERO', 0)
+        if bzero != 0:
+            raw_data += bzero
+
+
+    print("0")
         
     # --- CRITICAL STEP: DARK CORRECTION (Performed first) ---
     if dark_filepath:
         print(f"Applying dark frame correction to science data...")
         with fits.open(dark_filepath) as hdul:
-            dark_data = hdul[0].data.astype(float)
+            data_raw_dark = hdul[0].data
+            dark_header = hdul[0].header
+            dark_data = np.asanyarray(data_raw_dark).view(np.int16).astype(np.float32)
+            bzero = dark_header.get('BZERO', 0)
+            if bzero != 0:
+                dark_data += bzero
         if dark_data.ndim == 3:
             dark_data = np.mean(dark_data, axis=0)
             
@@ -169,6 +341,7 @@ def process_science_data(science_filepath, tform, s_factor, poly_coeffs_b1=None,
         # NumPy automatically broadcasts the 2D dark across the 3D science cube
         raw_data = raw_data - dark_data
         
+    print("1")
     frames, height, width = raw_data.shape
     half_y = height // 2
 
@@ -179,9 +352,12 @@ def process_science_data(science_filepath, tform, s_factor, poly_coeffs_b1=None,
     raw_data_split = np.reshape(raw_data, (scans, nsew_stk, height, width))
 
     scan_stokes = np.zeros((scans, 4, half_y, width))
+    
+    print("2")
 
     # Slice arrays and apply the calculated geometric shifts
     for s in range(scans):
+        print("3")
         
         b1_cleaned = np.zeros((nsew_stk, half_y, width))
         b2_cleaned = np.zeros((nsew_stk, half_y, width))
@@ -192,8 +368,8 @@ def process_science_data(science_filepath, tform, s_factor, poly_coeffs_b1=None,
 
             # Apply the same polynomial straightening to the science frames NOT CONSIDERED
             if poly_coeffs_b1 is not None and poly_coeffs_b2 is not None and config_roi is not None:
-                b1_frame = maping_coord(b1_frame, poly_coeffs_b1, config_roi['line_center_b1'], order=1, mode='nearest')
-                b2_frame = maping_coord(b2_frame, poly_coeffs_b2, config_roi['line_center_b2'], order=1, mode='nearest')
+                b1_frame,_ = maping_coord(b1_frame, poly_coeffs_b1, config_roi['line_center_b1'], order=1, mode='nearest')
+                b2_frame,_ = maping_coord(b2_frame, poly_coeffs_b2, config_roi['line_center_b2'], order=1, mode='nearest')
         
             # Warp beam 2 coordinates onto beam 1 coordinates
             b2_frame_reg = warp(b2_frame, tform, order=1)
@@ -232,15 +408,22 @@ def process_science_data(science_filepath, tform, s_factor, poly_coeffs_b1=None,
 
 if __name__ == "__main__":
     # Define your paths (Optional: Set dark_file to None if no dark frame exists)
-    raw_file_sci = "250206_AR13981flaring/t001_b0303_sp_20250206_100733_b3.fts"
-    raw_file_flats = "250206_AR13981flaring/t013_b0303_sp_20250206_112630_y3.fts"
-    raw_file_darks = "250206_AR13981flaring/t058_b0303_sp_20250206_153655_x3.fts"
-    
+    #raw_file_sci = "250206_AR13981flaring/t001_b0303_sp_20250206_100733_b3.fts"
+    #raw_file_flats = "250206_AR13981flaring/t013_b0303_sp_20250206_112630_y3.fts"
+    #raw_file_darks = "250206_AR13981flaring/t058_b0303_sp_20250206_153655_x3.fts"
+
+    raw_file_flats = "260522_observation_test/t012_b0606_sp_20260522_073915_y3.fts"
+    raw_file_darks = "260522_observation_test/t013_b0606_sp_20260522_073955_x3.fts"
+    raw_file_sci = "260522_observation_test/t011_b0606_sp_20260522_073723_b3.fts"
+
     # Step 1: Compute alignment and scale factor (handling darks first if present)
-    tform_matrix, s, config_roi = compute_calibration(raw_file_flats, dark_filepath=raw_file_darks)
-    
+    tform_matrix, s, config_roi, poly_coeffs_b1, poly_coeffs_b2 = compute_calibration(raw_file_flats, dark_filepath=raw_file_darks)
+
+    # Step 1.1 (Optional) Evaluate the calibration visually
+    #process_flats_eval(raw_file_flats, tform_matrix, s, poly_coeffs_b1=poly_coeffs_b1, poly_coeffs_b2=poly_coeffs_b2, config_roi=config_roi, dark_filepath=raw_file_darks)
+
     # Step 2: Extract final Stokes matrix (handling darks first if present)
-    stokes_cube, fits_header = process_science_data(raw_file_sci, tform_matrix, s, poly_coeffs_b1=None, poly_coeffs_b2=None, config_roi=config_roi, dark_filepath=raw_file_darks)
+    stokes_cube, fits_header = process_science_data(raw_file_sci, tform_matrix, s, poly_coeffs_b1=poly_coeffs_b1, poly_coeffs_b2=poly_coeffs_b2, config_roi=config_roi, dark_filepath=raw_file_darks)
     print(f"Final Stokes Cube Shape: {stokes_cube.shape}")
     plt.ioff()
     fig, ax = plt.subplots(nrows=2, ncols=2, sharex=True, sharey=True)
