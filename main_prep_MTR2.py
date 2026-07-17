@@ -380,8 +380,11 @@ def process_science_data(science_filepath, tform, s_factor, poly_coeffs_b1=None,
     seq_stk = header["SEQ_STOK"].split(" ")
     nsew_stk = len(seq_stk)
     scans = header["NAXIS3"]//nsew_stk
+
+    x_start, x_end = config_roi.get('crg1', [0, width]) if config_roi else [0, width]
+    y_start, y_end = config_roi.get('lrg1', [0, half_y]) if config_roi else [0, half_y]
     
-    print("Analyzing frame intensities to calculate scaling profiles...")
+    print("Analyzing frame intensities to calculate scaling profiles within clean ROI...")
     avb = np.zeros(frames, dtype=np.float32)
     avb1 = np.zeros(frames, dtype=np.float32)
     avb2 = np.zeros(frames, dtype=np.float32)
@@ -390,7 +393,9 @@ def process_science_data(science_filepath, tform, s_factor, poly_coeffs_b1=None,
         # 1. Get raw frame stats
         raw_b1 = raw_data_mapped[idx, 0:half_y, :].astype(np.float32) + bzero
         raw_b2 = raw_data_mapped[idx, half_y:, :].astype(np.float32) + bzero
-        avb[idx] = np.mean(raw_b1 + raw_b2) / 2.0  # Combined global mean equivalent
+
+        avb[idx] = np.mean(raw_b1[y_start:y_end, x_start:x_end] + 
+                           raw_b2[y_start:y_end, x_start:x_end]) / 2.0 # Combined global mean equivalent
 
         # 2. Process frame just enough to grab the mean, then discard it from RAM
         if dark_data is not None:
@@ -409,8 +414,8 @@ def process_science_data(science_filepath, tform, s_factor, poly_coeffs_b1=None,
         raw_b2_reg = warp(raw_b2, tform, order=1)
 
         # Store only the 1D scalar vector tracks[cite: 5]
-        avb1[idx] = np.mean(raw_b1)
-        avb2[idx] = np.mean(raw_b2_reg)
+        avb1[idx] = np.mean(raw_b1[y_start:y_end, x_start:x_end])
+        avb2[idx] = np.mean(raw_b2_reg[y_start:y_end, x_start:x_end])
 
     # Compute global scalars
     min_avb, max_avb = np.min(avb), np.max(avb)
