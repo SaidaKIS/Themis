@@ -366,9 +366,9 @@ def process_science_data(science_filepath, tform, s_factor, poly_coeffs_b1=None,
             data_raw_dark = hdul[0].data
             dark_header = hdul[0].header
             dark_raw = np.asanyarray(data_raw_dark).view(np.int16).astype(np.float32)
-            bzero = dark_header.get('BZERO', 0)
-            if bzero != 0:
-                dark_raw += bzero
+            dark_bzero = dark_header.get('BZERO', 0)
+            if dark_bzero != 0:
+                dark_raw += dark_bzero
 
         dark_data = np.mean(dark_raw, axis=0) if dark_raw.ndim == 3 else dark_raw
         del dark_raw # Immediately free memory
@@ -472,7 +472,7 @@ def process_science_data(science_filepath, tform, s_factor, poly_coeffs_b1=None,
             fig, ax = plt.subplots(nrows=2, ncols=2, sharex=True, sharey=True)
             stokes_labels = ['I', 'Q', 'U', 'V']
             for i in range(4):
-                ax[i//2, i%2].imshow(scan_stokes[s, i, :, config_roi['srg'][0]:config_roi['srg'][1]], cmap='gray', origin='lower')
+                ax[i//2, i%2].imshow(scan_stokes[s, i, y_start:y_end, x_start:x_end], cmap='gray', origin='lower')
                 ax[i//2, i%2].set_title(f"Stokes {stokes_labels[i]}")
             plt.tight_layout()
             plt.show()
@@ -481,7 +481,8 @@ def process_science_data(science_filepath, tform, s_factor, poly_coeffs_b1=None,
             plt.close(fig) 
 
     hdul.close()
-    return scan_stokes, header
+
+    return scan_stokes[:,:,y_start:y_end, x_start:x_end], header
 
 
 if __name__ == "__main__":
