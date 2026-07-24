@@ -16,20 +16,6 @@ def get_roi(flat_data):
     # Enable interactive plotting mode
     plt.ion()
     
-    # =========================================================================
-    # STEP 1: General Spectral Range (srg)
-    # =========================================================================
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.imshow(flat_data, cmap='gray', origin='lower')
-    ax.set_title("1. Click LEFT then RIGHT boundary of the general spectral region")
-    plt.draw()
-    print(">> Click LEFT then RIGHT boundary for general spectral range...")
-    
-    clicks_srg = plt.ginput(n=2, timeout=0)
-    x_srg = sorted([clicks_srg[0][0], clicks_srg[1][0]])
-    srg = (int(x_srg[0]), int(x_srg[1]))
-    plt.close(fig)
-
     # Slice the flat data into Top and Bottom fields 
     f1 = flat_data[0:half_y, :]
     f2 = flat_data[half_y:, :]
@@ -125,7 +111,6 @@ def get_roi(flat_data):
         
     # Package all metadata into a clean dictionary configuration matrix
     config = {
-        "srg": srg,                       # [start_col, end_col] general spectrum
         "l1wrg" : l1wrg,                     # [bottom_row, top_row] Beam 1 line core
         "line_center_b1": line_center_b1,       # Beam 1 line center (global coordinates)
         "lrg1": lrg1,                     # [top_row, bottom_row] Beam 1 final crop
