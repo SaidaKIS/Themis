@@ -29,6 +29,13 @@ from tqdm import tqdm
 # with a standard deviation of ~700 counts,
 # The gain factor 's' between the two beams is also determined to ensure accurate Stokes parameter extraction.
 
+#Example:
+# Camera 606 central wavelenght 6301 and 6302
+# "260522_observation_test/t012_b0606_sp_20260522_073915_y3.fts"
+# "260522_observation_test/t013_b0606_sp_20260522_073955_x3.fts"
+# "260522_observation_test/t014_b0606_sp_20260522_080309_b3.fts"
+    
+
 def remove_spectral_lines(straightened_flat):
     """
     Removes the vertical spectral line profiles to isolate pure pixel-to-pixel spatial gain variations.
@@ -459,7 +466,7 @@ def process_science_data(science_filepath, tform, s_factor, poly_coeffs_b1=None,
 
         # Calculate differences and sums on the chunk
         bs = (b1_chunk - s_factor * b2_chunk) / 2.0
-        is_map = (b1_chunk + b2_chunk) / 2.0
+        is_map = (s_factor * (b1_chunk + b2_chunk)) / 2.0
     
         # Save straight into the final pre-allocated matrix
         scan_stokes[s, 0] = np.mean(is_map, axis=0)            
@@ -484,29 +491,50 @@ def process_science_data(science_filepath, tform, s_factor, poly_coeffs_b1=None,
 
     return scan_stokes[:,:,y_start:y_end, x_start:x_end], header
 
-
 if __name__ == "__main__":
-    # Define your paths (Optional: Set dark_file to None if no dark frame exists)
-    #raw_file_sci = "250206_AR13981flaring/t001_b0303_sp_20250206_100733_b3.fts"
-    #raw_file_flats = "250206_AR13981flaring/t013_b0303_sp_20250206_112630_y3.fts"
-    #raw_file_darks = "250206_AR13981flaring/t058_b0303_sp_20250206_153655_x3.fts"
+    #Add the description of the code and the steps to follow in the README.md file
+    #Printed at the beginning of the code to inform the user about the steps to follow
+    print("Welcome to the MTR2 Data Processing Pipeline!")
+    print("This script will guide you through the steps to initially process your MTR2 data.")
+    print("Please ensure you have the following files ready:")
+    print("1. Flat-field FITS file (flats)")
+    print("2. Dark-frame FITS file (darks) - Optional")
+    print("3. Science FITS file (science data)")
+    print("The script will perform the following steps:")
+    print("1. Compute alignment and scale factor using the flat-field data.")
+    print("2. Evaluate the calibration visually (optional).")
+    print("3. Extract the final Stokes matrix from the science data.")
+    print("Please follow the prompts to provide the necessary file paths.")
 
-    raw_file_flats = "260522_observation_test/t012_b0606_sp_20260522_073915_y3.fts"
-    raw_file_darks = "260522_observation_test/t013_b0606_sp_20260522_073955_x3.fts"
-    raw_file_sci = "260522_observation_test/t014_b0606_sp_20260522_080309_b3.fts"
+    raw_file_flats = input("Enter the path and file of the flats:")
+    raw_file_darks = input("Enter the path and file of the darks (or leave blank if not available): ")
+    if raw_file_darks.strip() == "":
+        raw_file_darks = None
+    raw_file_sci = input("Enter the path and file of the science data:")
 
+    print("\nStarting the calibration and processing steps...\n")
     # Step 1: Compute alignment and scale factor (handling darks first if present)
-
     tform_matrix, s, config_roi, poly_coeffs_b1, poly_coeffs_b2, b1_flat_norm, b2_flat_norm = compute_calibration(raw_file_flats, dark_filepath=raw_file_darks)
 
     # Step 1.1 (Optional) Evaluate the calibration visually
-    
-    #process_flats_eval(raw_file_flats, tform_matrix, s, poly_coeffs_b1=poly_coeffs_b1, poly_coeffs_b2=poly_coeffs_b2, config_roi=config_roi, dark_filepath=raw_file_darks)
+    print("Would you like to evaluate the flat-field calibration visually? (yes/no)")
+    evaluate_flats = input().strip().lower()
+    if evaluate_flats == "yes":
+        process_flats_eval(raw_file_flats, tform_matrix, s, poly_coeffs_b1=poly_coeffs_b1, poly_coeffs_b2=poly_coeffs_b2, config_roi=config_roi, dark_filepath=raw_file_darks)
+
+    print("Do you agree to proceed with the Stokes matrix extraction using the computed calibration? (yes/no)")
+    proceed_stokes = input().strip().lower()
+    if proceed_stokes != "yes":
+        print("Process aborted by user. Exiting.")
+        exit(0)     
 
     # Step 2: Extract final Stokes matrix (handling darks first if present)
+    print("Extracting the final Stokes matrix from the science data...")
     stokes_cube, fits_header = process_science_data(raw_file_sci, tform_matrix, s, poly_coeffs_b1=poly_coeffs_b1, poly_coeffs_b2=poly_coeffs_b2, 
                                                     config_roi=config_roi, dark_filepath=raw_file_darks, b1_flat=b1_flat_norm, b2_flat=b2_flat_norm)
+
     print(f"Final Stokes Cube Shape: {stokes_cube.shape}")
+    print("Displaying the Stokes parameters for visual inspection...")
     plt.ioff()
     fig, ax = plt.subplots(nrows=2, ncols=2, sharex=True, sharey=True)
     stokes_labels = ['I', 'Q', 'U', 'V']
@@ -515,10 +543,21 @@ if __name__ == "__main__":
         ax[i//2, i%2].set_title(f"Stokes {stokes_labels[i]}")
     plt.tight_layout()
     plt.show()
+
     ## Save output
-    hdu = fits.PrimaryHDU(stokes_cube, header=fits_header)
-    hdu.writeto("stokes_output_s4.fits", overwrite=True)
-    print("Successfully saved clean Stokes parameters to 'stokes_output_s4.fits'")
+    print("Do you agree to save the clean Stokes parameters to a FITS file? (yes/no)")
+    save_stokes = input().strip().lower()
+    if save_stokes == "yes":
+        hdu = fits.PrimaryHDU(stokes_cube, header=fits_header)
+        hdu.writeto("stokes_output_cam6.fits", overwrite=True)
+        print("Successfully saved clean Stokes parameters to 'stokes_output_cam6.fits'")
+
+
+
+
+
+    
+
 
 
 
