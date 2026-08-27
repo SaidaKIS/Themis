@@ -157,3 +157,70 @@ TELESCOP= 'THEMIS'
 INSTITUT= 'Paris Observatory-Glasgow University'                                
 OBS_LOG =  'www.themis.iac.es'                                                  
 END   
+
+-------------------------INFORMATION---------------------------------
+#Multi-ray spectrograph MTR2
+# MTR2 is made of a predispersor (“SP1” first one on the left part), 
+# forming a low resolution spectrum on the wavelength selector 
+# (so called the “mask plate”). From there, only the selected bandwiths (masks)
+# travel to the high-resolution echelle spectrograph (right part), 
+# ending over the MTR cameras at the SP2 output (one bandwith per camera).
+
+# Info of the dataset
+# t001_b0303_sp_20250206_100733_b3.fts
+# sequence+wl(303:6299 to 6305 AA)+sp+time+b3(sci data)
+# 606(Halpha), b3(sci data) y3(flats) x3(darks)
+
+# Initial construction of the ND object
+# Active region test
+# Spectra - 6301 spectral range
+
+# NOTES 28 MAY 26: The residuals of the dual-beam processing in the flat images reaches around -250 to 250
+# counts in the image intensity so it could give an idea of some cross-talk. Intensity levels are around 1300 to 1400 and the
+# stokes V signals are reaching 100 to 200 counts.
+
+#----------------------HEADER-----------------------------
+
+#spec_scale = header.get('SPECSCAL', 1.0) / 1000.0  # Converting mAngstrom to Angstrom if needed
+#wave_ref = header.get('WAVELNTH', 6562.8)         # Central wavelength
+#
+## Spatial Axis (Axis 2)
+#spat_scale = header.get('SPATSCAL', 0.234) / 3600.0 # Converting arcsec to degrees
+#
+## Time/Scan Axis (Axis 3)
+## In SCAN mode, each step is often a shift in solar X
+#step_x = header.get('STEP_X', 0.5) / 3600.0        # Step size in degrees
+#
+#wcs_dict = {
+#    'BITPIX': header['BITPIX'],
+#    'NAXIS': header['NAXIS'],
+#    'NAXIS1': header['NAXIS1'],
+#    'NAXIS2': header['NAXIS2'],
+#    'NAXIS3': header['NAXIS3'],
+#
+#    'DATE-OBS': header["DATE-OBS"],
+#    'DATE-BEG': header["DATE-BEG"],
+#    'DATE-END': header["DATE-END"],
+#    'EXPTIME': header["EXPTIME"],
+#
+#    'CTYPE1': 'WAVELNTH', 
+#    'CUNIT1': 'Angstrom', 
+#    'CDELT1': header['SPECSCAL'] * 1000, #verificar con la calibración 
+#    'CRPIX1': header['NAXIS1'], 
+#    'CRVAL1': np.nan, #verificar con la calibración
+#
+#    'CTYPE2': 'HPLT-TAN', # Helioprojective Latitude (Spatial along slit)
+#    'CUNIT2': 'deg',
+#    'CDELT2': spat_scale,
+#    'CRPIX2': header['NAXIS2'],
+#    'CRVAL2': header.get('DIST_NS', 0.0) / 3600.0,
+#
+#    'CTYPE3': 'HPLN-TAN', # Helioprojective Longitude (The scan direction)
+#    'CUNIT3': 'deg',
+#    'CDELT3': step_x,
+#    'CRPIX3': 1,
+#    'CRVAL3': header.get('DIST_EW', 0.0) / 3600.0,
+#}
+
+
+
