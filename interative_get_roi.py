@@ -122,7 +122,6 @@ def get_roi(flat_data):
     }
     
     print("\n--- Interactive Selection Complete ---")
-    print(f"Spectral Window (srg): {config['srg']}")
     
     return config
 
