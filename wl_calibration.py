@@ -168,8 +168,10 @@ def main():
     print("5. Compute the linear transformation to calibrate the wavelength axis of the observed data using the central wavelengths of the selected spectral lines in the reference atlas and the central wavelengths of the selected spectral lines in the observed data.")
     print("6. Apply the linear transformation to the wavelength axis of the observed data.")
     print("7. Create a full cube of the wavelength-calibrated observed data and save it as a new fits file.")   
-        
+
     #Load the solar and telluric reference atlas .npy files
+    # From https://zenodo.org/records/14674504 Solar and Telluric spectra for wavelength calibration
+    # Authors/Creators : National Solar Observatory V2
     solar_atlas = np.load("solar_reference_atlas.npy")
     telluric_atlas = np.load("telluric_reference_atlas.npy")
 
