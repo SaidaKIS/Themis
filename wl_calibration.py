@@ -227,6 +227,9 @@ def main():
     rest_spectrum_array = np.arange(rest_spectrum.shape[0])
     wavelength_calibrated = a * rest_spectrum_array + b
 
+    spectral_resolution_observed_binned = 10000 * ((wavelength_calibrated[1] - wavelength_calibrated[0]))
+    print("Spectral resolution of the original wavelength-calibrated observed data:", spectral_resolution_observed_binned, "mA")  
+
     #Eighth, make two axis in a figure sharing the x axis comparing 
     # the wavelength-calibrated observed data with the solar and telluric reference atlas.
     fig, ax = plt.subplots(nrows=2, ncols=1, sharex=True, figsize=(10, 8))
@@ -246,38 +249,56 @@ def main():
     #the final step is to create a full cube of the wavelength-calibrated observed data and save it as a new fits file. 
     #The new fits file will have a shape of [stokes, y (spatial dimension), x(scans), wavelength] including the new scale of calibrated wavelengths and it will have the same header as the original observed data file, but with the updated wavelength axis.
     #Remember: [scans, stokes, y, x]
+    #We also add a binning of the wavelenght to avoid oversampling and reduce the data size.
     scans, stokes, y, wavelenght = stokes_cube[0].data.shape
-    wavelength_calibrated_cube = np.zeros_like(np.zeros([stokes, y, scans, wavelenght]))
+    wavelenght_binned = wavelenght // 2  # update the wavelength dimension after binning
+    wavelength_calibrated_cube = np.zeros_like(np.zeros([stokes, y, scans, wavelenght_binned]), dtype=np.float32)
+    if wavelenght % 2 != 0:
+        print("Odd number of wavelength pixels, reducing by 1.")
+        wavelenght -= 1
+        wavelength_calibrated = wavelength_calibrated[:-1]
+
     for i in range(scans):
         for j in range(stokes):
-            wavelength_calibrated_cube[j, :, i, :] = stokes_cube[0].data[i, j, :, :]/rest_spectrum_max  #normalize the data to the maximum value of the rest spectrum
+            #normalize the data to the maximum value of the rest spectrum
+            rest_spectrum_max = np.max(rest_spectrum)
+            stokes_cube[0].data[i, j, :, :] /= rest_spectrum_max
+            #apply the binning to the wavelength axis with mean as operation
+            wavelength_calibrated_cube[j, :, i, :] = stokes_cube[0].data[i, j, :, :wavelenght].reshape(y, wavelenght_binned, 2).mean(axis=2)        
 
-    #Check the wavelength-calibrated cube ploting a images of the first stokes paramenter in one wavelength slice at 630.31 nm:
-    wavelength_index = np.argmin(np.abs(wavelength_calibrated - 630.31))
-    print("Wavelength index for 630.31 nm:", wavelength_index)
-    plt.figure(figsize=(10, 5))
-    plt.imshow(wavelength_calibrated_cube[0, :, :, wavelength_index], aspect='auto', cmap='gray')
-    plt.title("Wavelength-Calibrated Cube - First Stokes Parameter at 630.31 nm")
-    plt.xlabel("X (scans)")
-    plt.ylabel("Y (spatial dimension)")
-    plt.colorbar(label="Intensity")
-    plt.show()
+    wavelength_calibrated = wavelength_calibrated.reshape(wavelenght_binned, 2).mean(axis=1)    
 
-    #Check also the stokes V parameter at 630.24 nm:
-    wavelength_index_V = np.argmin(np.abs(wavelength_calibrated - 630.24))
-    print("Wavelength index for 630.24 nm:", wavelength_index_V)
-    plt.figure(figsize=(10, 5))
-    plt.imshow(wavelength_calibrated_cube[3, :, :, wavelength_index_V], aspect='auto', cmap='gray')
-    plt.title("Wavelength-Calibrated Cube - Stokes V Parameter at 630.24 nm")
-    plt.xlabel("X (scans)")
-    plt.ylabel("Y (spatial dimension)")
-    plt.colorbar(label="Intensity")
-    plt.show()
+    #Check the new spectral resolution of the wavelength-calibrated observed data.
+    spectral_resolution_observed_binned = 10000 * ((wavelength_calibrated[1] - wavelength_calibrated[0]))
+    print("Spectral resolution of the binned wavelength-calibrated observed data:", spectral_resolution_observed_binned, "mA")  
+    
+    ##Check the wavelength-calibrated cube ploting a images of the first stokes paramenter in one wavelength slice at 630.31 nm:
+    #wavelength_index = np.argmin(np.abs(wavelength_calibrated - 630.31))
+    #print("Wavelength index for 630.31 nm:", wavelength_index)
+    #plt.figure(figsize=(10, 5))
+    #plt.imshow(wavelength_calibrated_cube[0, :, :, wavelength_index], aspect='auto', cmap='gray')
+    #plt.title("Wavelength-Calibrated Cube - First Stokes Parameter at 630.31 nm")
+    #plt.xlabel("X (scans)")
+    #plt.ylabel("Y (spatial dimension)")
+    #plt.colorbar(label="Intensity")
+    #plt.show()
+#
+    ##Check also the stokes V parameter at 630.24 nm:
+    #wavelength_index_V = np.argmin(np.abs(wavelength_calibrated - 630.24))
+    #print("Wavelength index for 630.24 nm:", wavelength_index_V)
+    #plt.figure(figsize=(10, 5))
+    #plt.imshow(wavelength_calibrated_cube[3, :, :, wavelength_index_V], aspect='auto', cmap='gray')
+    #plt.title("Wavelength-Calibrated Cube - Stokes V Parameter at 630.24 nm")
+    #plt.xlabel("X (scans)")
+    #plt.ylabel("Y (spatial dimension)")
+    #plt.colorbar(label="Intensity")
+    #plt.show()
 
+    sys.exit(0)
 
     #Create a new fits file with the wavelength-calibrated observed data and save it with out replacing the original observed data file.
     #Include as a extra hdu the new wavelength axis and the original header of the observed data file.
-    new_fits_file = observed_stokes_file.replace(".fits", "norm_wavelength_calibrated.fits")
+    new_fits_file = observed_stokes_file.replace(".fits", "_norm_wavelength_calibrated.fits")
     hdu = fits.PrimaryHDU(data=wavelength_calibrated_cube, header=stokes_cube[0].header)
     hdul = fits.HDUList([hdu])
     wavelength_hdu = fits.ImageHDU(data=wavelength_calibrated, header=stokes_cube[0].header)
@@ -292,34 +313,4 @@ if __name__ == "__main__":
 
 
 
-#compare the wavelength ranges of the solar and telluric reference atlas with the rest spectrum of the observed data
-#plt.figure(figsize=(10, 5))
-#plt.plot(rest_spectrum_cam6, color='red', label='Rest Spectrum CAM6')
-#plt.plot(solar_region_intensities[::-1], color='blue', label='Solar Reference Atlas (630-630.5 nm)')
-#plt.plot(telluric_region_intensities[::-1], color='green', label='Telluric Reference Atlas (630-630.5 nm)')
-#plt.title("Comparison of Rest Spectrum with Solar and Telluric Reference Atlas")
-#plt.xlabel("Wavelength (pixel)")
-#plt.ylabel("Intensity")
-#plt.legend()
-#plt.tight_layout()
-#
-##check structure of the reference atlas
-#print("Solar Reference Atlas shape:", solar_atlas.shape)
-#print("Telluric Reference Atlas shape:", telluric_atlas.shape)
-#
-##check the wavelength range of the reference atlas
-#solar_wavelength_range = (np.min(solar_atlas[0, :]), np.max(solar_atlas[0, :]))
-#telluric_wavelength_range = (np.min(telluric_atlas[0, :]), np.max(telluric_atlas[0, :]))
-#print("Solar Reference Atlas Wavelength Range (nm):", solar_wavelength_range)
-#print("Telluric Reference Atlas Wavelength Range (nm):", telluric_wavelength_range)
-#
-##plot a specific region of the solar and telluric reference atlas for comparison in the same figure
-#plt.figure(figsize=(10, 5))
-#solar_region_mask = (solar_atlas[0, :] >= 630.0) & (solar_atlas[0, :] <= 630.5)
-#plt.plot(solar_atlas[0, solar_region_mask], solar_atlas[1, solar_region_mask], color='blue')
-#plt.title("Solar and Telluric Reference Atlas (630-630.5 nm)")
-#telluric_region_mask = (telluric_atlas[0, :] >= 630.0) & (telluric_atlas[0, :] <= 630.5)
-#plt.plot(telluric_atlas[0, telluric_region_mask], telluric_atlas[1, telluric_region_mask], color='green')
-#plt.xlabel("Wavelength (nm)")
-#plt.tight_layout()
-#
+
