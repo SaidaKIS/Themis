@@ -1,9 +1,11 @@
+
 import numpy as np
 from astropy.io import fits
 import astropy.units as u #Operations between units and constants
 import matplotlib.pyplot as plt
 plt.rcParams.update({'font.size': 22})
 import sys
+from datetime import datetime
 
 from skimage.registration import phase_cross_correlation
 from skimage.transform import warp, AffineTransform
@@ -35,7 +37,8 @@ from tqdm import tqdm
 # "260522_observation_test/t012_b0505_sp_20260522_073915_y3.fts"
 # "260522_observation_test/t013_b0505_sp_20260522_073955_x3.fts"
 # "260522_observation_test/t014_b0505_sp_20260522_080309_b3.fts"
-    
+
+# Third update: Calibration to generate only Stokes I - no polarization, and to save the Stokes cube in a FITS file with the original header from the science data.
 
 def remove_spectral_lines(straightened_flat):
     """
@@ -201,10 +204,9 @@ def process_flats_eval(flat_filepath, tform, s_factor, poly_coeffs_b1=None,
     print(f"Mean: {popt[1]:.2f}")
     print(f"Sigma: {popt[2]:.2f}") 
 
-    plt.plot(x_curva, y_curva, 'r-', linewidth=2, label=f'Ajuste Gaussiano\n$mu={popt[1]:.2f}, sigma={popt[2]:.2f}$')
+    plt.plot(x_curva, y_curva, 'r-', linewidth=2, label=f'Gaussian Fit\n$mu={popt[1]:.2f}, sigma={popt[2]:.2f}$')
 
     plt.title('Histogram of Residual Differences and Gaussian Fit')
-    plt.title("")
     plt.xlabel("Residual Intensity")
     plt.ylabel("Frequency")
     plt.grid(True)
@@ -492,6 +494,169 @@ def process_science_data(science_filepath, tform, s_factor, poly_coeffs_b1=None,
 
     return scan_stokes[:,:,y_start:y_end, x_start:x_end], header
 
+def compute_calibration_nopol(flat_filepath, dark_filepath=None, plot_check=False):
+    """
+    Reads flat-field, applies dark subtraction if available, computes sub-pixel alignment
+    and crop into the interesting region of the image. 
+    This version is for Stokes I only (no polarization).
+    """
+    # Load the flat-field FITS image
+    with fits.open(flat_filepath) as hdul:
+        data_raw = hdul[0].data
+        flat_header = hdul[0].header
+        # Convert raw data to signed integers and then to float for processing - Correct way for reading MATLAB fits
+        data_sign = np.asanyarray(data_raw).view(np.int16).astype(np.float64)
+        flat_data = data_sign + flat_header.get('BZERO', 0)  # Apply BZERO offset if present
+    
+    if flat_data.ndim == 3:
+        flat_data = np.mean(flat_data, axis=0) # Average frames if it's a cube
+        
+    # --- CRITICAL STEP: DARK CORRECTION (Performed first) ---
+
+    if dark_filepath:
+        print(f"Applying dark frame correction to flat-field using: {dark_filepath}")
+        with fits.open(dark_filepath) as hdul:
+            data_raw = hdul[0].data
+            dark_header = hdul[0].header
+            # Convert raw data to signed integers and then to float for processing - Correct way for reading MATLAB fits
+            data_sign = np.asanyarray(data_raw).view(np.int16).astype(np.float64)
+            dark_data = data_sign + dark_header.get('BZERO', 0)  # Apply BZERO offset if present
+        if dark_data.ndim == 3:
+            dark_data = np.mean(dark_data, axis=0)
+        
+        # Additive dark noise must be removed before dealing with multiplicative flats
+        flat_data = flat_data - dark_data
+
+    #Get the config file of the parameters interativelly
+    config_roi = get_roi(flat_data, no_pol=True)
+
+    b_flat = flat_data[: , :]
+
+    # Compute the the polynomial De-curving debugging
+    b_flat_straight, poly_coeffs_b, fitted_line_b = straighten_spectral_lines(b_flat, line_center_col=config_roi['line_center_b1'], ymin=config_roi['lrg1'][0], ymax=config_roi['lrg1'][1])   
+    b_spatial_flat = remove_spectral_lines(b_flat_straight)
+
+    b_flat_norm = b_spatial_flat / np.mean(b_spatial_flat)
+
+    if plot_check == True:
+        plt.ioff()
+        fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(10, 5), sharex=True, sharey=True)
+        ax[0].imshow(b_flat_norm, cmap='gray', origin='lower')
+        ax[0].set_title(f"Normalized Flat")
+        plt.tight_layout()
+        plt.show()
+
+    return config_roi, poly_coeffs_b, b_flat_norm
+
+def process_science_data_nopol(science_filepath, tform_matrix=None, s_factor=None, poly_coeffs_b1=None, 
+                        config_roi=None, dark_filepath=None, b1_flat=None, b2_flat=None):
+    """
+    Applies initial dark subtraction, maps alignment, normalizes gain, 
+    and resolves the Stokes I component from the modulation sequence.
+    This version is for Stokes I only (no polarization).
+    """
+    # 1. Open with memmap=True (Do not use 'with' so the file stays mapped)
+    hdul = fits.open(science_filepath)
+    header = hdul[0].header
+
+    # Keep it as an int16 view to save massive RAM
+    raw_data_mapped = np.asanyarray(hdul[0].data).view(np.int16)
+    bzero = header.get('BZERO', 0)
+
+    # For validation of the procedure
+    input_local='no'
+    
+    print("Dark correction and Stokes I extraction will be applied to the science data...")
+        
+    # --- CRITICAL STEP: DARK CORRECTION (Performed first) ---
+    if dark_filepath:
+        print(f"Applying dark frame correction to science data...")
+        with fits.open(dark_filepath) as hdul:
+            data_raw_dark = hdul[0].data
+            dark_header = hdul[0].header
+            dark_raw = np.asanyarray(data_raw_dark).view(np.int16).astype(np.float32)
+            dark_bzero = dark_header.get('BZERO', 0)
+            if dark_bzero != 0:
+                dark_raw += dark_bzero
+
+        dark_data = np.mean(dark_raw, axis=0) if dark_raw.ndim == 3 else dark_raw
+        del dark_raw # Immediately free memory
+        dark_data = dark_data.astype(np.float32)
+
+
+    frames, height, width = raw_data_mapped.shape
+    scans = header["NAXIS3"]
+    
+    x_start, x_end = config_roi.get('crg1', [0, width]) if config_roi else [0, width]
+    y_start, y_end = config_roi.get('lrg1', [0, height]) if config_roi else [0, height]
+        
+    print("Analyzing frame intensities to calculate scaling profiles within clean ROI...")
+    avb = np.zeros(frames, dtype=np.float32)
+    avb1 = np.zeros(frames, dtype=np.float32)
+    
+    for idx in tqdm(range(frames), desc="Profiling Frames", unit="frame"):
+        # 1. Get raw frame stats
+            raw_b1 = raw_data_mapped[idx, :, :].astype(np.float32) + bzero
+            
+            avb[idx] = np.mean(raw_b1[y_start:y_end, x_start:x_end]) # Combined global mean equivalent
+    
+            # 2. Process frame just enough to grab the mean, then discard it from RAM
+            if dark_data is not None:
+                raw_b1 -= dark_data[:, :]
+    
+            if poly_coeffs_b1 is not None and config_roi is not None:
+                raw_b1, _ = maping_coord(raw_b1, poly_coeffs_b1, config_roi['line_center_b1'], order=1, mode='nearest')
+
+            if b1_flat is not None:
+                raw_b1 /= b1_flat
+        
+            # Store only the 1D scalar vector tracks[cite: 5]
+            avb1[idx] = np.mean(raw_b1[y_start:y_end, x_start:x_end])
+    
+        # Compute global scalars
+    min_avb, max_avb = np.min(avb), np.max(avb)
+    min_avb1, max_avb1 = np.min(avb1), np.max(avb1)
+    
+    # Pre-allocate ONLY the final output array
+    scan_stokes = np.zeros((scans, 1, height, width), dtype=np.float32)
+    
+    print("Processing Stokes I ...")
+        
+    for s in tqdm(range(scans), desc="Processing Scans", unit="scan"):
+        # Temporary small storage just for the current scan's modulation frames
+           
+        frame_idx = s
+    
+        b1_frame = raw_data_mapped[frame_idx, :, :].astype(np.float32) + bzero
+    
+        if dark_data is not None:
+            b1_frame -= dark_data[:, :]
+    
+        if poly_coeffs_b1 is not None and config_roi is not None:
+            b1_frame, _ = maping_coord(b1_frame, poly_coeffs_b1, config_roi['line_center_b1'], order=1, mode='nearest')
+    
+        if b1_flat is not None:
+            b1_frame /= b1_flat
+    
+        scan_stokes[s, 0] = min_avb + ((b1_frame - min_avb1) * (max_avb - min_avb)) / (max_avb1 - min_avb1)
+
+        if input_local == 'no':
+            plt.ioff()
+            fig, ax = plt.subplots(nrows=1, ncols=1, sharex=True, sharey=True)
+            stokes_labels = ['I']
+            ax.imshow(scan_stokes[s, 0, y_start:y_end, x_start:x_end], cmap='gray', origin='lower')
+            ax.set_title(f"Stokes {stokes_labels[0]}")
+            plt.tight_layout()
+            plt.show()
+
+            input_local = input("  Validate the calculation? [yes/no]  ")
+            plt.close(fig) 
+    
+        hdul.close()
+    
+        return scan_stokes[:,:,y_start:y_end, x_start:x_end], header
+
+
 if __name__ == "__main__":
     #Add the description of the code and the steps to follow in the README.md file
     #Printed at the beginning of the code to inform the user about the steps to follow
@@ -507,43 +672,81 @@ if __name__ == "__main__":
     print("3. Extract the final Stokes matrix from the science data.")
     print("Please follow the prompts to provide the necessary file paths.")
 
-    raw_file_flats = input("Enter the path and file of the flats (y3):")
-    raw_file_darks = input("Enter the path and file of the darks (x3) (or leave blank if not available): ")
-    if raw_file_darks.strip() == "":
-        raw_file_darks = None
-    raw_file_sci = input("Enter the path and file of the science data (b3):")
+    no_pol = input("Do you want to process the data without polarization (Stokes I only)? (yes/no): ").strip().lower()
+    if no_pol == "yes":
+        raw_file_flats = input("Enter the path and file of the flats (y3):")
+        raw_file_darks = input("Enter the path and file of the darks (x3) (or leave blank if not available): ")
+        if raw_file_darks.strip() == "":
+            raw_file_darks = None
+        raw_file_sci = input("Enter the path and file of the science data (b3):")
 
-    print("\nStarting the calibration and processing steps...\n")
-    # Step 1: Compute alignment and scale factor (handling darks first if present)
-    tform_matrix, s, config_roi, poly_coeffs_b1, poly_coeffs_b2, b1_flat_norm, b2_flat_norm = compute_calibration(raw_file_flats, dark_filepath=raw_file_darks)
+        print("\nStarting the calibration and processing steps for Stokes I only...\n")
+        # Step 1: Compute alignment and scale factor (handling darks first if present)
+        config_roi, poly_coeffs_b, b_flat_norm = compute_calibration_nopol(raw_file_flats, dark_filepath=raw_file_darks, plot_check=True)
 
-    # Step 1.1 (Optional) Evaluate the calibration visually
-    print("Would you like to evaluate the flat-field calibration visually? (yes/no)")
-    evaluate_flats = input().strip().lower()
-    if evaluate_flats == "yes":
-        process_flats_eval(raw_file_flats, tform_matrix, s, poly_coeffs_b1=poly_coeffs_b1, poly_coeffs_b2=poly_coeffs_b2, config_roi=config_roi, dark_filepath=raw_file_darks)
+        print("Do you agree to proceed with the Stokes I extraction using the computed calibration? (yes/no)")
+        proceed_stokes = input().strip().lower()
+        if proceed_stokes != "yes":
+            print("Process aborted by user. Exiting.")
+            exit(0)     
 
-    print("Do you agree to proceed with the Stokes matrix extraction using the computed calibration? (yes/no)")
-    proceed_stokes = input().strip().lower()
-    if proceed_stokes != "yes":
-        print("Process aborted by user. Exiting.")
-        exit(0)     
+        # Step 2: Extract final Stokes I matrix (handling darks first if present)
+        print("Extracting the final Stokes I matrix from the science data...")
+        stokes_cube, fits_header = process_science_data_nopol(raw_file_sci, tform_matrix=None, s_factor=None, poly_coeffs_b1=poly_coeffs_b, 
+                                                        config_roi=config_roi, dark_filepath=raw_file_darks, b1_flat=b_flat_norm, b2_flat=None)
 
-    # Step 2: Extract final Stokes matrix (handling darks first if present)
-    print("Extracting the final Stokes matrix from the science data...")
-    stokes_cube, fits_header = process_science_data(raw_file_sci, tform_matrix, s, poly_coeffs_b1=poly_coeffs_b1, poly_coeffs_b2=poly_coeffs_b2, 
-                                                    config_roi=config_roi, dark_filepath=raw_file_darks, b1_flat=b1_flat_norm, b2_flat=b2_flat_norm)
+        print(f"Final Stokes Cube Shape: {stokes_cube.shape}")
 
-    print(f"Final Stokes Cube Shape: {stokes_cube.shape}")
-    print("Displaying the Stokes parameters for visual inspection...")
-    plt.ioff()
-    fig, ax = plt.subplots(nrows=2, ncols=2, sharex=True, sharey=True)
-    stokes_labels = ['I', 'Q', 'U', 'V']
-    for i in range(4):
-        ax[i//2, i%2].imshow(stokes_cube[0, i, :,:], cmap='gray', origin='lower')
-        ax[i//2, i%2].set_title(f"Stokes {stokes_labels[i]}")
-    plt.tight_layout()
-    plt.show()
+    else:
+
+        raw_file_flats = input("Enter the path and file of the flats (y3):")
+        raw_file_darks = input("Enter the path and file of the darks (x3) (or leave blank if not available): ")
+        if raw_file_darks.strip() == "":
+            raw_file_darks = None
+        raw_file_sci = input("Enter the path and file of the science data (b3):")
+
+        print("\nStarting the calibration and processing steps...\n")
+        # Step 1: Compute alignment and scale factor (handling darks first if present)
+        tform_matrix, s, config_roi, poly_coeffs_b1, poly_coeffs_b2, b1_flat_norm, b2_flat_norm = compute_calibration(raw_file_flats, dark_filepath=raw_file_darks)
+
+        # Step 1.1 (Optional) Evaluate the calibration visually
+        print("Would you like to evaluate the flat-field calibration visually? (yes/no)")
+        evaluate_flats = input().strip().lower()
+        if evaluate_flats == "yes":
+            process_flats_eval(raw_file_flats, tform_matrix, s, poly_coeffs_b1=poly_coeffs_b1, poly_coeffs_b2=poly_coeffs_b2, config_roi=config_roi, dark_filepath=raw_file_darks)
+
+        print("Do you agree to proceed with the Stokes matrix extraction using the computed calibration? (yes/no)")
+        proceed_stokes = input().strip().lower()
+        if proceed_stokes != "yes":
+            print("Process aborted by user. Exiting.")
+            exit(0)     
+
+        # Step 2: Extract final Stokes matrix (handling darks first if present)
+        print("Extracting the final Stokes matrix from the science data...")
+        stokes_cube, fits_header = process_science_data(raw_file_sci, tform_matrix, s, poly_coeffs_b1=poly_coeffs_b1, poly_coeffs_b2=poly_coeffs_b2, 
+                                                        config_roi=config_roi, dark_filepath=raw_file_darks, b1_flat=b1_flat_norm, b2_flat=b2_flat_norm)
+
+
+        print(f"Final Stokes Cube Shape: {stokes_cube.shape}")
+        print("Displaying the Stokes parameters for visual inspection...")
+
+        if no_pol == "yes":
+            plt.ioff()
+            fig, ax = plt.subplots(nrows=1, ncols=1, sharex=True, sharey=True)
+            stokes_labels = ['I']
+            ax.imshow(stokes_cube[0, 0, :,:], cmap='gray', origin='lower')
+            ax.set_title(f"Stokes {stokes_labels[0]}")
+            plt.tight_layout()
+            plt.show()
+        else:
+            plt.ioff()
+            fig, ax = plt.subplots(nrows=2, ncols=2, sharex=True, sharey=True)
+            stokes_labels = ['I', 'Q', 'U', 'V']
+            for i in range(4):
+                ax[i//2, i%2].imshow(stokes_cube[0, i, :,:], cmap='gray', origin='lower')
+                ax[i//2, i%2].set_title(f"Stokes {stokes_labels[i]}")
+            plt.tight_layout()
+            plt.show()
 
     ## Save output
     print("Do you agree to save the clean Stokes parameters to a FITS file? (yes/no)")
@@ -560,6 +763,13 @@ if __name__ == "__main__":
         sci_file_hdu.close()
         #add some keywords from the original header to the new header
         fits_header['HISTORY'] = 'Processed with MTR2 pipeline'
+        fits_header['DATE'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        fits_header['NAXIS'] = 4
+        fits_header['NAXIS1'] = stokes_cube.shape[3]  #Width
+        fits_header['NAXIS2'] = stokes_cube.shape[2]  #Height
+        fits_header['NAXIS3'] = stokes_cube.shape[1]  #Stokes parameters
+        fits_header['NAXIS4'] = stokes_cube.shape[0]  #Scans
+        fits_header['NOPOL'] = no_pol
         fits_header['SCALE'] = s
         matrix = tform_matrix.params
         fits_header["CRPIX1"] = float(matrix[0][2])  # X translation/offset
@@ -570,7 +780,10 @@ if __name__ == "__main__":
         fits_header["CD2_2"] = float(matrix[1][1])
         fits_header['POLYB1'] = str(poly_coeffs_b1)
         fits_header['POLYB2'] = str(poly_coeffs_b2)
-        fits_header['STOKES'] = 'IQUV'
+        if no_pol == "yes":
+            fits_header['STOKES'] = 'I'
+        else:
+            fits_header['STOKES'] = 'IQUV'
         hdu = fits.PrimaryHDU(stokes_cube, header=fits_header)
         hdu.writeto(file_name, overwrite=True)
         print(f"Successfully saved clean Stokes parameters to '{file_name}'")
