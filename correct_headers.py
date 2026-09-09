@@ -15,7 +15,7 @@ data_hdr_cam6 = data_hdu_cam6[0].header
 stk_seq = data_hdr_cam6["SEQ_STOK"]
 
 # modification of a header camera 505 
-raw_file_sci_cam5 = "260522_observation_test/t014_b0505_sp_20260522_080309_b3.fts"
+raw_file_sci_cam5 = "20290901_Bommier/t001_b0606_sp_20260901_073054_b3.fts"
 
 #Checking and rewriting the headers
 
