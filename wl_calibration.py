@@ -2,7 +2,6 @@ import numpy as np
 from astropy.io import fits
 import astropy.units as u #Operations between units and constants
 import matplotlib.pyplot as plt
-plt.rcParams.update({'font.size': 22})
 import glob
 import sys
 from astropy.wcs import WCS
@@ -15,6 +14,42 @@ from matplotlib.widgets import SpanSelector
 
 #The user defines first the central wavelength of the observed data range to be calibrated and the number of telluric lines in the observed data range. 
 #The code then finds the best matching region of the solar and telluric reference atlas with the rest spectrum of the observed data.
+
+class rectangle_selector:
+    def __init__(self, img):
+        self.xmin = None
+        self.xmax = None
+        self.ymin = None
+        self.ymax = None
+
+        self.fig, self.ax = plt.subplots(figsize=(8, 4))
+        self.ax.imshow(img, origin='lower', aspect='auto', cmap='gray')
+        self.ax.set_title("Select rectangle region by dragging the mouse.\nExplicit red rectangle marks boundaries. Escape to reset. Close to finish.")
+        self.rect = None
+        self.cid_press = self.fig.canvas.mpl_connect("button_press_event", self.on_press)
+        self.cid_release = self.fig.canvas.mpl_connect("button_release_event", self.on_release)
+
+    def on_press(self, event):
+        if event.inaxes != self.ax:
+            return
+        self.x0 = event.xdata
+        self.y0 = event.ydata
+        if self.rect is not None:
+            self.rect.remove()
+        self.rect = self.ax.add_patch(plt.Rectangle((self.x0, self.y0), 0, 0, edgecolor="red", facecolor="none", lw=2))
+        self.fig.canvas.draw_idle()
+
+    def on_release(self, event):
+        if event.inaxes != self.ax:
+            return
+        self.x1 = event.xdata
+        self.y1 = event.ydata
+        self.xmin = min(self.x0, self.x1)
+        self.xmax = max(self.x0, self.x1)
+        self.ymin = min(self.y0, self.y1)
+        self.ymax = max(self.y0, self.y1)
+        self.rect.set_bounds(self.xmin, self.ymin, self.xmax - self.xmin, self.ymax - self.ymin)
+        self.fig.canvas.draw_idle()
 
 class wl_range_selector_atlas:
     def __init__(self, s_wl, s_int, t_wl, t_int, type='first telluric line'):
@@ -184,17 +219,21 @@ def main():
     #Load the observed Stokes data and compute the rest spectrum as the average of the observed spectra and normalize it to the maximum value of the rest spectrum.
     #Load measured stokes and compute a rest spectra as the average of the observed spectra
     stokes_cube = fits.open(observed_stokes_file)
-    print("Stokes data shape:", stokes_cube[0].data.shape)
     #Typically: [scans, stokes, y, x] y-> along slit, x-> along wavelength
     #Calculating the rest spectrum as the average of the observed spectra and normalize it to the maximum value of the rest spectrum.
     #the wavelength axis is inverted, so we need to flip it to match the reference atlas
-    rest_spectrum = np.mean(stokes_cube[0].data[:, 0, :, :], axis=(0,1))
+    #Not all field of view should be use to calculate the rest spectrum, 
+    # we should select a custom region visualy with the rectangle selector.
+    img = stokes_cube[0].data[:, 0, :, 50]
+    selector = rectangle_selector(img)
+    plt.show()
+    ymin, ymax = int(selector.ymin), int(selector.ymax)
+    xmin, xmax = int(selector.xmin), int(selector.xmax)
+    print(f"Selected region: xmin={xmin}, xmax={xmax}, ymin={ymin}, ymax={ymax}")
+    rest_spectrum = np.mean(stokes_cube[0].data[ymin:ymax, 0, xmin:xmax, :], axis=(0,1))
     rest_spectrum = rest_spectrum[::-1]  # Flip the wavelength axis to match the reference atlas
-    #finding the maximum value of the rest spectrum to normalize it
     rest_spectrum_max = np.max(rest_spectrum)
-    print("Maximum value of the rest spectrum:", rest_spectrum_max)
     rest_spectrum = rest_spectrum / rest_spectrum_max
-    print("Rest spectrum shape:", rest_spectrum.shape)
 
     #Third, we ask the user to define the central wavelength of the observed data range to be calibrated and the number of telluric lines in the observed data range.
     central_wavelength = float(input("Enter the central wavelength of the observed data range to be calibrated (in nm): "))
@@ -251,6 +290,7 @@ def main():
     #Remember: [scans, stokes, y, x]
     #We also add a binning of the wavelenght to avoid oversampling and reduce the data size.
     scans, stokes, y, wavelenght = stokes_cube[0].data.shape
+    print(f"Original Stokes cube shape: {stokes_cube[0].data.shape}")
     wavelenght_binned = wavelenght // 2  # update the wavelength dimension after binning
     wavelength_calibrated_cube = np.zeros_like(np.zeros([stokes, y, scans, wavelenght_binned]), dtype=np.float32)
     if wavelenght % 2 != 0:
@@ -261,40 +301,42 @@ def main():
     for i in range(scans):
         for j in range(stokes):
             #normalize the data to the maximum value of the rest spectrum
-            rest_spectrum_max = np.max(rest_spectrum)
             stokes_cube[0].data[i, j, :, :] /= rest_spectrum_max
             #apply the binning to the wavelength axis with mean as operation
-            wavelength_calibrated_cube[j, :, i, :] = stokes_cube[0].data[i, j, :, :wavelenght].reshape(y, wavelenght_binned, 2).mean(axis=2)        
-
+            wavelength_calibrated_cube[j, :, i, :] = stokes_cube[0].data[i, j, :, :wavelenght].reshape(y, wavelenght_binned, 2).mean(axis=2) 
+            
     wavelength_calibrated = wavelength_calibrated.reshape(wavelenght_binned, 2).mean(axis=1)    
 
     #Check the new spectral resolution of the wavelength-calibrated observed data.
     spectral_resolution_observed_binned = 10000 * ((wavelength_calibrated[1] - wavelength_calibrated[0]))
     print("Spectral resolution of the binned wavelength-calibrated observed data:", spectral_resolution_observed_binned, "mA")  
-    
-    ##Check the wavelength-calibrated cube ploting a images of the first stokes paramenter in one wavelength slice at 630.31 nm:
-    #wavelength_index = np.argmin(np.abs(wavelength_calibrated - 630.31))
-    #print("Wavelength index for 630.31 nm:", wavelength_index)
-    #plt.figure(figsize=(10, 5))
-    #plt.imshow(wavelength_calibrated_cube[0, :, :, wavelength_index], aspect='auto', cmap='gray')
-    #plt.title("Wavelength-Calibrated Cube - First Stokes Parameter at 630.31 nm")
-    #plt.xlabel("X (scans)")
-    #plt.ylabel("Y (spatial dimension)")
-    #plt.colorbar(label="Intensity")
-    #plt.show()
-#
-    ##Check also the stokes V parameter at 630.24 nm:
-    #wavelength_index_V = np.argmin(np.abs(wavelength_calibrated - 630.24))
-    #print("Wavelength index for 630.24 nm:", wavelength_index_V)
-    #plt.figure(figsize=(10, 5))
-    #plt.imshow(wavelength_calibrated_cube[3, :, :, wavelength_index_V], aspect='auto', cmap='gray')
-    #plt.title("Wavelength-Calibrated Cube - Stokes V Parameter at 630.24 nm")
-    #plt.xlabel("X (scans)")
-    #plt.ylabel("Y (spatial dimension)")
-    #plt.colorbar(label="Intensity")
-    #plt.show()
 
-    sys.exit(0)
+    print('Final wavelength-calibrated cube shape:', wavelength_calibrated_cube.shape)
+
+    #Invert the wavelength axis to ensure increasing order
+    wavelength_calibrated_cube = wavelength_calibrated_cube[:, :, :, ::-1]
+
+    #Check the wavelength-calibrated cube ploting a images of the first stokes paramenter in one wavelength slice at 630.31 nm with the same spatial scaling:   
+    wavelength_index = np.argmin(np.abs(wavelength_calibrated - 630.31))
+    print("Wavelength index for 630.31 nm:", wavelength_index)
+    plt.figure(figsize=(10, 5))
+    plt.imshow(wavelength_calibrated_cube[0, :, :, wavelength_index], aspect='auto', cmap='gray')
+    plt.title("Wavelength-Calibrated Cube - First Stokes Parameter at 630.31 nm")
+    plt.xlabel("X (scans)")
+    plt.ylabel("Y (spatial dimension)")
+    plt.colorbar(label="Intensity")
+    plt.show()
+
+    #Check also the stokes V parameter at 630.24 nm:
+    wavelength_index_V = np.argmin(np.abs(wavelength_calibrated - 630.24))
+    print("Wavelength index for 630.24 nm:", wavelength_index_V)
+    plt.figure(figsize=(10, 5))
+    plt.imshow(wavelength_calibrated_cube[3, :, :, wavelength_index_V], aspect='auto', cmap='gray')
+    plt.title("Wavelength-Calibrated Cube - Stokes V Parameter at 630.24 nm")
+    plt.xlabel("X (scans)")
+    plt.ylabel("Y (spatial dimension)")
+    plt.colorbar(label="Intensity")
+    plt.show()
 
     #Create a new fits file with the wavelength-calibrated observed data and save it with out replacing the original observed data file.
     #Include as a extra hdu the new wavelength axis and the original header of the observed data file.
