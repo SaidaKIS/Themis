@@ -50,6 +50,14 @@ def get_roi(flat_data, no_pol=False):
 
         line_center_b1 = int(np.mean(c_wrg))
 
+        ax.set_title("BEAM: Click BOTTOM then TOP limits of the line to warp")
+        plt.draw()
+        print(">> Beam 1: Click BOTTOM then TOP vertical limits of the line core...")
+        clicks_l1 = plt.ginput(n=2, timeout=0)
+        l1wrg = sorted([int(clicks_l1[0][1]), int(clicks_l1[1][1])])
+        plt.close(fig)
+        
+                
         #=========================================================================
         #STEP 4: Define Final Spatial ROI Crop Box 1 (crg1, lrg1)
         #=========================================================================
@@ -68,7 +76,7 @@ def get_roi(flat_data, no_pol=False):
 
         # Package all metadata into a clean dictionary configuration matrix
         config = {
-            "l1wrg" : c_wrg,                     # [bottom_row, top_row] Beam 1 line core
+            "l1wrg" : l1wrg,                     # [bottom_row, top_row] Beam 1 line core
             "line_center_b1": line_center_b1,       # Beam 1 line center (global coordinates)
             "lrg1": lrg1,                     # [top_row, bottom_row] Beam 1 final crop
             "crg1": crg1,                     # [left_col, right_col] Beam 1 final crop
