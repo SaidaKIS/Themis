@@ -14,6 +14,7 @@ from scipy.ndimage import map_coordinates
 from interative_get_roi import get_roi
 from scipy.optimize import curve_fit
 from tqdm import tqdm
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 #------Basic procedure: Raw Data -> Dark Subtraction -> 
 #      De-curving (Straightening) -> Flat-Field Division -> Affine Beam Alignment 
@@ -540,9 +541,13 @@ def compute_calibration_nopol(flat_filepath, dark_filepath=None, plot_check=Fals
 
     if plot_check == True:
         plt.ioff()
-        fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(10, 5), sharex=True, sharey=True)
-        ax[0].imshow(b_flat_norm, cmap='gray', origin='lower')
-        ax[0].set_title(f"Normalized Flat")
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(10, 5), sharex=True, sharey=True)
+        p=ax.imshow(b_flat_norm, cmap='gray', origin='lower')
+        ax.set_title(f"Normalized Flat")
+        divider = make_axes_locatable(ax)
+        cax1 = divider.append_axes('right', size='5%', pad="1%")
+        cb1 = fig.colorbar(p, cax=cax1, orientation='vertical')
+                    
         plt.tight_layout()
         plt.show()
 
@@ -586,11 +591,12 @@ def process_science_data_nopol(science_filepath, tform_matrix=None, s_factor=Non
 
     frames, height, width = raw_data_mapped.shape
     scans = header["NAXIS3"]
+    print(scans)
     
     x_start, x_end = config_roi.get('crg1', [0, width]) if config_roi else [0, width]
     y_start, y_end = config_roi.get('lrg1', [0, height]) if config_roi else [0, height]
         
-    print("Analyzing frame intensities to calculate scaling profiles within clean ROI...")
+    print("Analyzing frame intensities within clean ROI...")
     avb = np.zeros(frames, dtype=np.float32)
     avb1 = np.zeros(frames, dtype=np.float32)
     
@@ -648,13 +654,13 @@ def process_science_data_nopol(science_filepath, tform_matrix=None, s_factor=Non
             ax.set_title(f"Stokes {stokes_labels[0]}")
             plt.tight_layout()
             plt.show()
+            plt.close(fig) 
 
             input_local = input("  Validate the calculation? [yes/no]  ")
-            plt.close(fig) 
     
-        hdul.close()
+    hdul.close()
     
-        return scan_stokes[:,:,y_start:y_end, x_start:x_end], header
+    return scan_stokes[:,:,y_start:y_end, x_start:x_end], header
 
 
 if __name__ == "__main__":
@@ -672,8 +678,8 @@ if __name__ == "__main__":
     print("3. Extract the final Stokes matrix from the science data.")
     print("Please follow the prompts to provide the necessary file paths.")
 
-    no_pol = input("Do you want to process the data without polarization (Stokes I only)? (yes/no): ").strip().lower()
-    if no_pol == "yes":
+    no_pol = input("Do you want to process the data with or without polarization? (with/without): ").strip().lower()
+    if no_pol == "without":
         raw_file_flats = input("Enter the path and file of the flats (y3):")
         raw_file_darks = input("Enter the path and file of the darks (x3) (or leave blank if not available): ")
         if raw_file_darks.strip() == "":
@@ -769,21 +775,32 @@ if __name__ == "__main__":
         fits_header['NAXIS2'] = stokes_cube.shape[2]  #Height
         fits_header['NAXIS3'] = stokes_cube.shape[1]  #Stokes parameters
         fits_header['NAXIS4'] = stokes_cube.shape[0]  #Scans
-        fits_header['NOPOL'] = no_pol
-        fits_header['SCALE'] = s
-        matrix = tform_matrix.params
-        fits_header["CRPIX1"] = float(matrix[0][2])  # X translation/offset
-        fits_header["CRPIX2"] = float(matrix[1][2])  # Y translation/offset
-        fits_header["CD1_1"] = float(matrix[0][0])  # X scaling/rotation
-        fits_header["CD1_2"] = float(matrix[0][1])
-        fits_header["CD2_1"] = float(matrix[1][0])
-        fits_header["CD2_2"] = float(matrix[1][1])
-        fits_header['POLYB1'] = str(poly_coeffs_b1)
-        fits_header['POLYB2'] = str(poly_coeffs_b2)
-        if no_pol == "yes":
+        if no_pol == "without":
+            fits_header['NOPOL'] = 'yes'
+            fits_header['SCALE'] = None
             fits_header['STOKES'] = 'I'
+            fits_header["CRPIX1"] = None  # X translation/offset
+            fits_header["CRPIX2"] = None  # Y translation/offset
+            fits_header["CD1_1"] = None  # X scaling/rotation
+            fits_header["CD1_2"] = None
+            fits_header["CD2_1"] = None
+            fits_header["CD2_2"] = None
+            fits_header['POLYB1'] = None
+            fits_header['POLYB2'] = None
         else:
+            fits_header['NOPOL'] = 'no'
+            fits_header['SCALE'] = s
+            matrix = tform_matrix.params
+            fits_header["CRPIX1"] = float(matrix[0][2])  # X translation/offset
+            fits_header["CRPIX2"] = float(matrix[1][2])  # Y translation/offset
+            fits_header["CD1_1"] = float(matrix[0][0])  # X scaling/rotation
+            fits_header["CD1_2"] = float(matrix[0][1])
+            fits_header["CD2_1"] = float(matrix[1][0])
+            fits_header["CD2_2"] = float(matrix[1][1])
+            fits_header['POLYB1'] = str(poly_coeffs_b1)
+            fits_header['POLYB2'] = str(poly_coeffs_b2)
             fits_header['STOKES'] = 'IQUV'
+
         hdu = fits.PrimaryHDU(stokes_cube, header=fits_header)
         hdu.writeto(file_name, overwrite=True)
         print(f"Successfully saved clean Stokes parameters to '{file_name}'")
