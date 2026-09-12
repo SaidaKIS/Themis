@@ -124,7 +124,7 @@ def straighten_spectral_lines(image, line_center_col, ymin, ymax, search_window=
     return straightened_image, poly_coefficients, fitted_line
 
 def process_flats_eval(flat_filepath, tform, s_factor, poly_coeffs_b1=None, 
-                        poly_coeffs_b2=None, config_roi=None, dark_filepath=None):
+                        poly_coeffs_b2=None, config_roi=None, dark_filepath=None, plot_check=False):
     """
     Evaluates the flat-field calibration by applying dark subtraction, 
     mapping alignment, normalizing gain, and computing the residuals.
@@ -164,6 +164,16 @@ def process_flats_eval(flat_filepath, tform, s_factor, poly_coeffs_b1=None,
     if poly_coeffs_b1 is not None and poly_coeffs_b2 is not None and config_roi is not None:
         b1_flat,_ = maping_coord(b1_flat, poly_coeffs_b1, config_roi['line_center_b1'], order=1, mode='nearest')
         b2_flat,_ = maping_coord(b2_flat, poly_coeffs_b2, config_roi['line_center_b2'], order=1, mode='nearest')
+    
+    if plot_check:
+        plt.figure()
+        plt.imshow(b1_flat, aspect='auto', cmap='gray', origin='lower')
+        plt.title("Beam 1 Flat After Straightening")
+        plt.show()
+        plt.figure()
+        plt.imshow(b2_flat, aspect='auto', cmap='gray', origin='lower')
+        plt.title("Beam 2 Flat After Straightening")
+        plt.show()
 
     # Warp beam 2 coordinates onto beam 1 coordinates
     b2_flat_reg = warp(b2_flat, tform, order=1)
@@ -171,47 +181,55 @@ def process_flats_eval(flat_filepath, tform, s_factor, poly_coeffs_b1=None,
     # Compute the residual difference after alignment and scaling
     residual_diff = b1_flat - s_factor * b2_flat_reg
 
-    plt.ioff()
-    fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(15, 5))
-    ax[0].imshow(b1_flat, cmap='gray', origin='lower')
-    ax[0].set_title("Beam 1 Flat")
-    
-    ax[1].imshow(b2_flat_reg, cmap='gray', origin='lower')
-    ax[1].set_title("Beam 2 Flat (Registered)")
-    
-    im = ax[2].imshow(residual_diff, cmap='bwr', origin='lower', vmin=-10000, vmax=10000)
-    ax[2].set_title("Residual Difference (b1 - s*b2)")
-    plt.colorbar(im, ax=ax[2], fraction=0.046, pad=0.04)
-    plt.tight_layout()
-    plt.show()    
+    x_start, x_end = config_roi.get('crg1', [0, width]) if config_roi else [0, width]
+    y_start, y_end = config_roi.get('lrg1', [0, half_y]) if config_roi else [0, half_y]
+        
+    b_flat_mean = (b1_flat[y_start:y_end, x_start:x_end]+ s_factor * b2_flat_reg[y_start:y_end, x_start:x_end])/2
 
-    n, bins, patches = plt.hist(residual_diff.flatten(), bins=200, color='gray', alpha=0.7)
+    if plot_check:
+        plt.ioff()
+        fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(15, 5))
+        ax[0].imshow(b1_flat, cmap='gray', origin='lower')
+        ax[0].set_title("Beam 1 Flat")
 
-    bin_centers = (bins[:-1] + bins[1:]) / 2
+        ax[1].imshow(b2_flat_reg, cmap='gray', origin='lower')
+        ax[1].set_title("Beam 2 Flat (Registered)")
 
-    def funcion_gaussiana(x, amp, mean, sigma):
-        return amp * np.exp(-(x - mean)**2 / (2 * sigma**2))
+        im = ax[2].imshow(residual_diff, cmap='bwr', origin='lower', vmin=-10000, vmax=10000)
+        ax[2].set_title("Residual Difference (b1 - s*b2)")
+        plt.colorbar(im, ax=ax[2], fraction=0.046, pad=0.04)
+        plt.tight_layout()
+        plt.show()    
 
-    p0 = [max(n), np.mean(residual_diff.flatten()), np.std(residual_diff.flatten())]
+        n, bins, patches = plt.hist(residual_diff.flatten(), bins=200, color='gray', alpha=0.7)
 
-    popt, pcov = curve_fit(funcion_gaussiana, bin_centers, n, p0=p0)
+        bin_centers = (bins[:-1] + bins[1:]) / 2
 
-    x_curva = np.linspace(min(bins), max(bins), 100)
-    y_curva = funcion_gaussiana(x_curva, *popt)
+        def gaussian_funtion(x, amp, mean, sigma):
+            return amp * np.exp(-(x - mean)**2 / (2 * sigma**2))
 
-    # Print gaussian fit parameters
-    print(f"Gaussian Fit Parameters:")
-    print(f"Amplitude: {popt[0]:.2f}")
-    print(f"Mean: {popt[1]:.2f}")
-    print(f"Sigma: {popt[2]:.2f}") 
+        p0 = [max(n), np.mean(residual_diff.flatten()), np.std(residual_diff.flatten())]
 
-    plt.plot(x_curva, y_curva, 'r-', linewidth=2, label=f'Gaussian Fit\n$mu={popt[1]:.2f}, sigma={popt[2]:.2f}$')
+        popt, pcov = curve_fit(gaussian_funtion, bin_centers, n, p0=p0)
 
-    plt.title('Histogram of Residual Differences and Gaussian Fit')
-    plt.xlabel("Residual Intensity")
-    plt.ylabel("Frequency")
-    plt.grid(True)
-    plt.show()  
+        x_curva = np.linspace(min(bins), max(bins), 100)
+        y_curva = gaussian_funtion(x_curva, *popt)
+
+        # Print gaussian fit parameters
+        print(f"Gaussian Fit Parameters:")
+        print(f"Amplitude: {popt[0]:.2f}")
+        print(f"Mean: {popt[1]:.2f}")
+        print(f"Sigma: {popt[2]:.2f}") 
+
+        plt.plot(x_curva, y_curva, 'r-', linewidth=2, label=f'Gaussian Fit\n$mu={popt[1]:.2f}, sigma={popt[2]:.2f}$')
+
+        plt.title('Histogram of Residual Differences and Gaussian Fit')
+        plt.xlabel("Residual Intensity")
+        plt.ylabel("Frequency")
+        plt.grid(True)
+        plt.show() 
+
+    return b_flat_mean   
 
 def compute_calibration(flat_filepath, dark_filepath=None, plot_check=False):
     """
@@ -719,7 +737,10 @@ if __name__ == "__main__":
         print("Would you like to evaluate the flat-field calibration visually? (yes/no)")
         evaluate_flats = input().strip().lower()
         if evaluate_flats == "yes":
-            process_flats_eval(raw_file_flats, tform_matrix, s, poly_coeffs_b1=poly_coeffs_b1, poly_coeffs_b2=poly_coeffs_b2, config_roi=config_roi, dark_filepath=raw_file_darks)
+            flat_mean = process_flats_eval(raw_file_flats, tform_matrix, s, poly_coeffs_b1=poly_coeffs_b1, poly_coeffs_b2=poly_coeffs_b2, config_roi=config_roi, dark_filepath=raw_file_darks, plot_check=True)
+        else:
+            flat_mean = process_flats_eval(raw_file_flats, tform_matrix, s, poly_coeffs_b1=poly_coeffs_b1, poly_coeffs_b2=poly_coeffs_b2, config_roi=config_roi, dark_filepath=raw_file_darks, plot_check=False)
+                    
 
         print("Do you agree to proceed with the Stokes matrix extraction using the computed calibration? (yes/no)")
         proceed_stokes = input().strip().lower()
@@ -802,7 +823,10 @@ if __name__ == "__main__":
             fits_header['STOKES'] = 'IQUV'
 
         hdu = fits.PrimaryHDU(stokes_cube, header=fits_header)
-        hdu.writeto(file_name, overwrite=True)
+        hdul = fits.HDUList([hdu])
+        flat_hdu = fits.ImageHDU(data=flat_mean, header=fits_header)
+        hdul.append(flat_hdu)
+        hdul.writeto(file_name, overwrite=True)
         print(f"Successfully saved clean Stokes parameters to '{file_name}'")
 
 
