@@ -808,6 +808,7 @@ if __name__ == "__main__":
             fits_header["CD2_2"] = None
             fits_header['POLYB1'] = None
             fits_header['POLYB2'] = None
+            flat_mean = None
         else:
             fits_header['NOPOL'] = 'no'
             fits_header['SCALE'] = s
