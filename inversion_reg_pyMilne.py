@@ -5,12 +5,36 @@ import glob
 import sys
 import os
 sys.path.append("../pyMilne")
-import MilneEddington as MEy
+import MilneEddington as ME
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from astropy.coordinates import SkyCoord
+import astropy.units as u
+from astropy.time import Time
+from sunpy.coordinates.utils import get_heliocentric_angle
 
+def mu_angle(time, carr_longitude, carr_latitude):
+
+    obstime = Time(time, scale="utc")
+
+    carrington_lon = carr_longitude * u.deg
+    carrington_lat = carr_latitude * u.deg
+
+    coords_carrington = SkyCoord(
+        lon=carrington_lon, 
+        lat=carrington_lat, 
+        obstime=obstime, 
+        frame="heliographic_carrington", 
+        observer="earth"  # Define el punto de vista del observador
+    )
+
+    # 3. Calcular el ángulo mu (cos(theta))
+    # sunpy calcula internamente la posición respecto al observador al usar la función rspherical
+    mu = np.cos(get_heliocentric_angle(coords_carrington))
+
+    return mu.value
 
 def process_fits_cube(fits_path, out_path, wavelength, lines, 
-                      N_WORKERS=1, initial_guess=None, psf=None):
+                      N_WORKERS=1, mu=1.0, initial_guess=None, psf=None):
     
     with fits.open(fits_path, memmap=True) as hdul:
         data_cube = hdul[0].data  # Shape: (4, Ny, Nx, N_wvl)
@@ -42,7 +66,7 @@ def process_fits_cube(fits_path, out_path, wavelength, lines,
         inverted_model, syn , chi2 = me_inverter.invert_spatially_regularized(initial_guess, 
                                                                          obs=reshaped_stokes, 
                                                                          sig=3E-3, 
-                                                                         mu=1.0, 
+                                                                         mu=mu, 
                                                                          nIter=20, 
                                                                          chi2_thres=1.0)
 
@@ -69,12 +93,20 @@ def process_fits_cube(fits_path, out_path, wavelength, lines,
 
         print("Inversion finished successfully for all pixels.")
 
-
 if __name__ == "__main__":
     INPUT_FITS = input("Enter path to input FITS file: ")
     OUTPUT_FITS = input("Enter path to output FITS file: ")
     LINES_IN = input("Enter spectral line labels (e.g., 6301, 6302, 5247, 5250): ")
     LINES = [int(line.strip()) for line in LINES_IN.split(',')]
+
+    HEADER = fits.open(INPUT_FITS)[1].header
+
+    CARR_LONGITUDE = HEADER.get('LONGCARR', 150.0)
+    CARR_LATITUDE = HEADER.get('LATITUD', 25.0)
+    OBS_TIME = HEADER.get('DATE-OBS', "2026-09-15T12:00:00")
+
+    mu = mu_angle(OBS_TIME, CARR_LONGITUDE, CARR_LATITUDE)
+    print(f"Mu angle: {mu}")
 
     # Calibrated wavelength axis in Ångströms
     WVL_nm = fits.open(INPUT_FITS)[1].data
@@ -91,5 +123,6 @@ if __name__ == "__main__":
         WVL_A, 
         LINES, 
         N_WORKERS=N_WORKERS,
+        mu=mu,
         initial_guess=m_in
     )
