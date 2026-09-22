@@ -39,11 +39,11 @@ class spect_check():
     def __init__(self, cube_obs, contour_image=None, levels=None):
 
         self.cube_obs = np.array(cube_obs)
-        self.stokes_fov_avg = np.nanmean(self.cube_obs, axis=(1,2))
-        print(self.stokes_fov_avg.shape)
         self.cube_shape = self.cube_obs.shape
-        self.bg_map = self.cube_obs[0,:,:,0] 
-    
+        print("Cube shape:", self.cube_shape)
+        self.stokes_fov_avg = np.nanmean(self.cube_obs, axis=(1,2))
+        self.bg_map = self.cube_obs[0,:,:,0]
+        
     def set_parameters(self, scan_pos, lam=None, cont_value=1, pix_size=1):
         self.scan_pos = scan_pos
         self.lam = lam
@@ -60,86 +60,126 @@ class spect_check():
     
     def inspect(self, cmap_context='gray'):
         self.cmap_bg = cmap_context
-        
-        self.fig = plt.figure(figsize=(15,10))
-        spec = gridspec.GridSpec(ncols=2, nrows=4, figure=self.fig)
-        self.ax0 = self.fig.add_subplot(spec[0:4, 0:1])
-        self.ax1 = self.fig.add_subplot(spec[0, 1])
-        self.ax2 = self.fig.add_subplot(spec[1, 1])
-        self.ax3 = self.fig.add_subplot(spec[2, 1])
-        self.ax4 = self.fig.add_subplot(spec[3, 1])
 
-        self.p1 = self.ax0.imshow(self.bg_map, origin='lower', cmap=self.cmap_bg, aspect='auto')
-        divider = make_axes_locatable(self.ax0)
-        cax1 = divider.append_axes('right', size='5%', pad="1%")
-        self.cb1=self.fig.colorbar(self.p1, cax=cax1, orientation='vertical')
-        
-        if isinstance(self.contour_image, bool) == False:
-            self.X = np.arange(0,self.cube_shape[2],1)
-            self.Y = np.arange(0,self.cube_shape[1],1)
-            self.p2 = self.ax0.contour(self.X,self.Y,self.contour_image, levels=self.levels)
-            cax2 = divider.append_axes('top', size='5%', pad="1%")
-            self.cb2=self.fig.colorbar(self.p2, cax=cax2, orientation='horizontal')
-            cax2.xaxis.set_ticks_position("top")
+        if self.cube_shape[0] == 4:
+            self.fig = plt.figure(figsize=(15,10))
+            spec = gridspec.GridSpec(ncols=2, nrows=4, figure=self.fig)
+            self.ax0 = self.fig.add_subplot(spec[0:4, 0:1])
+            self.ax1 = self.fig.add_subplot(spec[0, 1])
+            self.ax2 = self.fig.add_subplot(spec[1, 1])
+            self.ax3 = self.fig.add_subplot(spec[2, 1])
+            self.ax4 = self.fig.add_subplot(spec[3, 1])
 
-        self.ax1.plot(self.wl, self.stokes_fov_avg[0]/self.cont, color='orange', label='Mean')
-        self.ax2.plot(self.wl, self.stokes_fov_avg[1]/self.cont, color='orange', label='Mean')
-        self.ax3.plot(self.wl, self.stokes_fov_avg[2]/self.cont, color='orange', label='Mean')
-        self.ax4.plot(self.wl, self.stokes_fov_avg[3]/self.cont, color='orange', label='Mean')
+            self.p1 = self.ax0.imshow(self.bg_map, origin='lower', cmap=self.cmap_bg, aspect='auto')
+            divider = make_axes_locatable(self.ax0)
+            cax1 = divider.append_axes('right', size='5%', pad="1%")
+            self.cb1=self.fig.colorbar(self.p1, cax=cax1, orientation='vertical')
 
-        self.line_obs1, = self.ax1.plot([], [], color='black', label='Observed')
-        self.line_obs2, = self.ax2.plot([], [], color='black', label='Observed')
-        self.line_obs3, = self.ax3.plot([], [], color='black', label='Observed')
-        self.line_obs4, = self.ax4.plot([], [], color='black', label='Observed')
+            if isinstance(self.contour_image, bool) == False:
+                self.X = np.arange(0,self.cube_shape[2],1)
+                self.Y = np.arange(0,self.cube_shape[1],1)
+                self.p2 = self.ax0.contour(self.X,self.Y,self.contour_image, levels=self.levels)
+                cax2 = divider.append_axes('top', size='5%', pad="1%")
+                self.cb2=self.fig.colorbar(self.p2, cax=cax2, orientation='horizontal')
+                cax2.xaxis.set_ticks_position("top")
 
-        self.ax2.hlines(3e-3, self.wl[0], self.wl[-1], colors='red', linestyles='dashed')
-        self.ax3.hlines(3e-3, self.wl[0], self.wl[-1], colors='red', linestyles='dashed')
-        self.ax4.hlines(3e-3, self.wl[0], self.wl[-1], colors='red', linestyles='dashed')
-        self.ax2.hlines(-3e-3, self.wl[0], self.wl[-1], colors='red', linestyles='dashed')
-        self.ax3.hlines(-3e-3, self.wl[0], self.wl[-1], colors='red', linestyles='dashed')
-        self.ax4.hlines(-3e-3, self.wl[0], self.wl[-1], colors='red', linestyles='dashed')
-        
-        self.ax1.set_ylabel(r'$I/I_c$')
-        self.ax2.set_ylabel(r'$U/I_c$')
-        self.ax3.set_ylabel(r'$Q/I_c$')
-        self.ax4.set_ylabel(r'$V/I_c$')
-        self.ax4.set_xlabel('Wavelength [Å]')
-        self.ax1.legend()
-        self.ax2.legend()
-        self.ax3.legend()
-        self.ax4.legend()
-        self.ax1.grid()
-        self.ax2.grid()
-        self.ax3.grid()
-        self.ax4.grid()
+            self.ax1.plot(self.wl, self.stokes_fov_avg[0]/self.cont, color='orange', label='Mean')
+            self.ax2.plot(self.wl, self.stokes_fov_avg[1]/self.cont, color='orange', label='Mean')
+            self.ax3.plot(self.wl, self.stokes_fov_avg[2]/self.cont, color='orange', label='Mean')
+            self.ax4.plot(self.wl, self.stokes_fov_avg[3]/self.cont, color='orange', label='Mean')
 
-        self.ax1.set_ylim([0.0,1.1])
-        self.ax2.set_ylim([-0.05,0.05])
-        self.ax3.set_ylim([-0.05,0.05])
-        self.ax4.set_ylim([-0.3,0.3])
+            self.line_obs1, = self.ax1.plot([], [], color='black', label='Observed')
+            self.line_obs2, = self.ax2.plot([], [], color='black', label='Observed')
+            self.line_obs3, = self.ax3.plot([], [], color='black', label='Observed')
+            self.line_obs4, = self.ax4.plot([], [], color='black', label='Observed')
 
-        self.ax1.set_xlim([self.wl[0],self.wl[-1]])
-        self.ax2.set_xlim([self.wl[0],self.wl[-1]])
-        self.ax3.set_xlim([self.wl[0],self.wl[-1]])
-        self.ax4.set_xlim([self.wl[0],self.wl[-1]])
+            self.ax2.hlines(3e-3, self.wl[0], self.wl[-1], colors='red', linestyles='dashed')
+            self.ax3.hlines(3e-3, self.wl[0], self.wl[-1], colors='red', linestyles='dashed')
+            self.ax4.hlines(3e-3, self.wl[0], self.wl[-1], colors='red', linestyles='dashed')
+            self.ax2.hlines(-3e-3, self.wl[0], self.wl[-1], colors='red', linestyles='dashed')
+            self.ax3.hlines(-3e-3, self.wl[0], self.wl[-1], colors='red', linestyles='dashed')
+            self.ax4.hlines(-3e-3, self.wl[0], self.wl[-1], colors='red', linestyles='dashed')
 
-        self.cursor1 = Cursor(self.ax0, horizOn = True, vertOn = True, color = 'red',linewidth = '0.5')
-        self.cid1= self.fig.canvas.mpl_connect("motion_notify_event", self.pointing1)
+            self.ax1.set_ylabel(r'$I/I_c$')
+            self.ax2.set_ylabel(r'$U/I_c$')
+            self.ax3.set_ylabel(r'$Q/I_c$')
+            self.ax4.set_ylabel(r'$V/I_c$')
+            self.ax4.set_xlabel('Wavelength [Å]')
+            self.ax1.legend()
+            self.ax2.legend()
+            self.ax3.legend()
+            self.ax4.legend()
+            self.ax1.grid()
+            self.ax2.grid()
+            self.ax3.grid()
+            self.ax4.grid()
 
-        self.cursor2 = Cursor(self.ax1, horizOn = False, vertOn = True, color = 'blue',linewidth = '0.5')
-        self.cid2= self.fig.canvas.mpl_connect("motion_notify_event", self.pointing2)
+            self.ax1.set_ylim([0.0,1.1])
+            self.ax2.set_ylim([-0.05,0.05])
+            self.ax3.set_ylim([-0.05,0.05])
+            self.ax4.set_ylim([-0.3,0.3])
 
-        self.cursor3 = Cursor(self.ax2, horizOn = False, vertOn = True, color = 'blue',linewidth = '0.5')
-        self.cid3= self.fig.canvas.mpl_connect("motion_notify_event", self.pointing3)
+            self.ax1.set_xlim([self.wl[0],self.wl[-1]])
+            self.ax2.set_xlim([self.wl[0],self.wl[-1]])
+            self.ax3.set_xlim([self.wl[0],self.wl[-1]])
+            self.ax4.set_xlim([self.wl[0],self.wl[-1]])
 
-        self.cursor4 = Cursor(self.ax3, horizOn = False, vertOn = True, color = 'blue',linewidth = '0.5')
-        self.cid4= self.fig.canvas.mpl_connect("motion_notify_event", self.pointing4)
+            self.cursor1 = Cursor(self.ax0, horizOn = True, vertOn = True, color = 'red',linewidth = '0.5')
+            self.cid1= self.fig.canvas.mpl_connect("motion_notify_event", self.pointing1)
 
-        self.cursor5 = Cursor(self.ax4, horizOn = False, vertOn = True, color = 'blue',linewidth = '0.5')
-        self.cid5= self.fig.canvas.mpl_connect("motion_notify_event", self.pointing5)
-        
+            self.cursor2 = Cursor(self.ax1, horizOn = False, vertOn = True, color = 'blue',linewidth = '0.5')
+            self.cid2= self.fig.canvas.mpl_connect("motion_notify_event", self.pointing2)
 
-        plt.show()
+            self.cursor3 = Cursor(self.ax2, horizOn = False, vertOn = True, color = 'blue',linewidth = '0.5')
+            self.cid3= self.fig.canvas.mpl_connect("motion_notify_event", self.pointing3)
+
+            self.cursor4 = Cursor(self.ax3, horizOn = False, vertOn = True, color = 'blue',linewidth = '0.5')
+            self.cid4= self.fig.canvas.mpl_connect("motion_notify_event", self.pointing4)
+
+            self.cursor5 = Cursor(self.ax4, horizOn = False, vertOn = True, color = 'blue',linewidth = '0.5')
+            self.cid5= self.fig.canvas.mpl_connect("motion_notify_event", self.pointing5)
+
+            plt.show()
+
+        elif self.cube_shape[0] == 1:
+            self.fig = plt.figure(figsize=(15,10))
+            spec = gridspec.GridSpec(ncols=2, nrows=1, figure=self.fig)
+            self.ax0 = self.fig.add_subplot(spec[0, 0])
+            self.ax1 = self.fig.add_subplot(spec[0, 1])
+
+            self.p1 = self.ax0.imshow(self.bg_map, origin='lower', cmap=self.cmap_bg, aspect='auto')
+            divider = make_axes_locatable(self.ax0)
+            cax1 = divider.append_axes('right', size='5%', pad="1%")
+            self.cb1=self.fig.colorbar(self.p1, cax=cax1, orientation='vertical')
+
+            if isinstance(self.contour_image, bool) == False:
+                self.X = np.arange(0,self.cube_shape[2],1)
+                self.Y = np.arange(0,self.cube_shape[1],1)
+                self.p2 = self.ax0.contour(self.X,self.Y,self.contour_image, levels=self.levels)
+                cax2 = divider.append_axes('top', size='5%', pad="1%")
+                self.cb2=self.fig.colorbar(self.p2, cax=cax2, orientation='horizontal')
+                cax2.xaxis.set_ticks_position("top")
+
+            self.ax1.plot(self.wl, self.stokes_fov_avg/self.cont, color='orange', label='Mean')
+
+            self.line_obs1, = self.ax1.plot([], [], color='black', label='Observed')
+
+            self.ax1.set_ylabel(r'$I/I_c$')
+            self.ax1.set_xlabel(r'Wavelength [Å]')
+
+            self.ax1.legend()
+                        
+            self.ax1.set_ylim([0.0,1.5])
+                        
+            self.ax1.set_xlim([self.wl[0],self.wl[-1]])
+                        
+            self.cursor1 = Cursor(self.ax0, horizOn = True, vertOn = True, color = 'red',linewidth = '0.5')
+            self.cid1= self.fig.canvas.mpl_connect("motion_notify_event", self.pointing1)
+            
+            self.cursor2 = Cursor(self.ax1, horizOn = False, vertOn = True, color = 'blue',linewidth = '0.5')
+            self.cid2= self.fig.canvas.mpl_connect("motion_notify_event", self.pointing2)
+
+            plt.show()
 
     def pointing1(self, event):
         if event.inaxes == self.ax0 and event.xdata is not None:
@@ -515,10 +555,9 @@ if __name__ == "__main__":
     stk_data_obs = hdul_obs[0].data
     stk_data_wl_obs = hdul_obs[1].data
 
-    hdul_inv = fits.open(file_name_inv)
-    stk_data_inv = hdul_inv[1].data
-
     if file_name_inv != None:
+        hdul_inv = fits.open(file_name_inv)
+        stk_data_inv = hdul_inv[1].data
         checking_obs_inv=spect_inv_check(stk_data_obs, stk_data_inv, inv_models=hdul_inv[0].data)
         checking_obs_inv.set_parameters(stk_data_wl_obs*10)
         checking_obs_inv.inspect(chi=True)
