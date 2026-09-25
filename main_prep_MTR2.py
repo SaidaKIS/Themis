@@ -1,6 +1,3 @@
-
-from email import header
-
 import numpy as np
 from astropy.io import fits
 import astropy.units as u #Operations between units and constants
@@ -405,7 +402,6 @@ class MTR2_flat:
                 plt.grid(True)
                 plt.show() 
             
-
 class MTR2_sci:
     def __init__(self, filepath, mode):
         self.filepath = filepath
