@@ -15,6 +15,7 @@ from scipy.optimize import curve_fit
 from tqdm import tqdm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from datetime import datetime
+import glob
 
 #------Basic procedure: Raw Data -> Dark Subtraction -> 
 #      De-curving (Straightening) -> Flat-Field Division -> Affine Beam Alignment 
@@ -190,7 +191,14 @@ class MTR2_flat:
                             
                 plt.tight_layout()
                 plt.show()
-  
+
+            self.tform = None
+            self.s_factor = None
+            self.poly_coeffs_b1 = None
+            self.poly_coeffs_b2 = None 
+            self.b1_flat_norm = None
+            self.b2_flat_norm = None
+
         elif self.mode == 'pol':
             """
             Reads flat-field, applies dark subtraction if available, splits the dual 
@@ -326,81 +334,81 @@ class MTR2_flat:
                 plt.tight_layout()
                 plt.show()
         
-            return self.tform, self.s_factor, self.config_roi, self.poly_coeffs_b1, self.poly_coeffs_b2, self.b1_flat_norm, self.b2_flat_norm
-        
+            self.poly_coeffs_b = None
+            self.b_flat_norm = None           
+
         else:
             raise ValueError(f"Unsupported mode: {self.mode}")
 
     def processed_flats_evaluation(self, plot_check=False):
-        if self.mode == 'pol':
-            # Apply polynomial straightening if coefficients are provided
-            if self.poly_coeffs_b1 is not None and self.poly_coeffs_b2 is not None and self.config_roi is not None:
-                b1_flat_eval,_ = maping_coord(self.b1_flat_norm, self.poly_coeffs_b1, self.config_roi['line_center_b1'], order=1, mode='nearest')
-                b2_flat_eval,_ = maping_coord(self.b2_flat_norm, self.poly_coeffs_b2, self.config_roi['line_center_b2'], order=1, mode='nearest')
+        # Apply polynomial straightening if coefficients are provided
+        if self.poly_coeffs_b1 is not None and self.poly_coeffs_b2 is not None and self.config_roi is not None:
+            b1_flat_eval,_ = maping_coord(self.b1_flat_norm, self.poly_coeffs_b1, self.config_roi['line_center_b1'], order=1, mode='nearest')
+            b2_flat_eval,_ = maping_coord(self.b2_flat_norm, self.poly_coeffs_b2, self.config_roi['line_center_b2'], order=1, mode='nearest')
+            
+        if plot_check:
+            plt.figure()
+            plt.imshow(b1_flat_eval, aspect='auto', cmap='gray', origin='lower')
+            plt.title("Beam 1 Flat After Straightening")
+            plt.show()
+            plt.figure()
+            plt.imshow(b2_flat_eval, aspect='auto', cmap='gray', origin='lower')
+            plt.title("Beam 2 Flat After Straightening")
+            plt.show()
+        
+        # Warp beam 2 coordinates onto beam 1 coordinates
+        b2_flat_reg = warp(b2_flat_eval, self.tform, order=1)
+        
+            # Compute the residual difference after alignment and scaling
+        self.residual_diff = b1_flat_eval - self.s_factor * b2_flat_reg
+        
+        self.x_start, self.x_end = self.config_roi.get('crg1', [0, self.width]) if self.config_roi else [0, self.width]
+        self.y_start, self.y_end = self.config_roi.get('lrg1', [0, self.half_y]) if self.config_roi else [0, self.half_y]
                 
-            if plot_check:
-                plt.figure()
-                plt.imshow(b1_flat_eval, aspect='auto', cmap='gray', origin='lower')
-                plt.title("Beam 1 Flat After Straightening")
-                plt.show()
-                plt.figure()
-                plt.imshow(b2_flat_eval, aspect='auto', cmap='gray', origin='lower')
-                plt.title("Beam 2 Flat After Straightening")
-                plt.show()
-            
-            # Warp beam 2 coordinates onto beam 1 coordinates
-            b2_flat_reg = warp(b2_flat_eval, self.tform, order=1)
-            
-                # Compute the residual difference after alignment and scaling
-            self.residual_diff = b1_flat_eval - self.s_factor * b2_flat_reg
-            
-            self.x_start, self.x_end = self.config_roi.get('crg1', [0, self.width]) if self.config_roi else [0, self.width]
-            self.y_start, self.y_end = self.config_roi.get('lrg1', [0, self.half_y]) if self.config_roi else [0, self.half_y]
-                    
-            self.b_flat_mean = (b1_flat_eval[self.y_start:self.y_end, self.x_start:self.x_end]+ self.s_factor * b2_flat_reg[self.y_start:self.y_end, self.x_start:self.x_end])/2
-            
-            if plot_check:
-                plt.ioff()
-                fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(15, 5))
-                ax[0].imshow(b1_flat_eval, cmap='gray', origin='lower')
-                ax[0].set_title("Beam 1 Flat")
+        self.b_flat_mean = (b1_flat_eval[self.y_start:self.y_end, self.x_start:self.x_end]+ self.s_factor * b2_flat_reg[self.y_start:self.y_end, self.x_start:self.x_end])/2
         
-                ax[1].imshow(b2_flat_reg, cmap='gray', origin='lower')
-                ax[1].set_title("Beam 2 Flat (Registered)")
-        
-                im = ax[2].imshow(self.residual_diff, cmap='bwr', origin='lower', vmin=-10000, vmax=10000)
-                ax[2].set_title("Residual Difference (b1 - s*b2)")
-                plt.colorbar(im, ax=ax[2], fraction=0.046, pad=0.04)
-                plt.tight_layout()
-                plt.show()    
-        
-                n, bins, patches = plt.hist(self.residual_diff.flatten(), bins=200, color='gray', alpha=0.7)
-        
-                bin_centers = (bins[:-1] + bins[1:]) / 2
-        
-                def gaussian_funtion(x, amp, mean, sigma):
-                    return amp * np.exp(-(x - mean)**2 / (2 * sigma**2))
-        
-                p0 = [max(n), np.mean(self.residual_diff.flatten()), np.std(self.residual_diff.flatten())]
-        
-                popt, pcov = curve_fit(gaussian_funtion, bin_centers, n, p0=p0)
-        
-                x_curva = np.linspace(min(bins), max(bins), 100)
-                y_curva = gaussian_funtion(x_curva, *popt)
-        
-                # Print gaussian fit parameters
-                print(f"Gaussian Fit Parameters:")
-                print(f"Amplitude: {popt[0]:.2f}")
-                print(f"Mean: {popt[1]:.2f}")
-                print(f"Sigma: {popt[2]:.2f}") 
-        
-                plt.plot(x_curva, y_curva, 'r-', linewidth=2, label=f'Gaussian Fit\n$mu={popt[1]:.2f}, sigma={popt[2]:.2f}$')
-        
-                plt.title('Histogram of Residual Differences and Gaussian Fit')
-                plt.xlabel("Residual Intensity")
-                plt.ylabel("Frequency")
-                plt.grid(True)
-                plt.show() 
+        if plot_check:
+            plt.ioff()
+            fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(15, 5))
+            ax[0].imshow(b1_flat_eval, cmap='gray', origin='lower')
+            ax[0].set_title("Beam 1 Flat")
+    
+            ax[1].imshow(b2_flat_reg, cmap='gray', origin='lower')
+            ax[1].set_title("Beam 2 Flat (Registered)")
+    
+            im = ax[2].imshow(self.residual_diff, cmap='bwr', origin='lower', vmin=-10000, vmax=10000)
+            ax[2].set_title("Residual Difference (b1 - s*b2)")
+            plt.colorbar(im, ax=ax[2], fraction=0.046, pad=0.04)
+            plt.tight_layout()
+            plt.show()    
+    
+            n, bins, patches = plt.hist(self.residual_diff.flatten(), bins=200, color='gray', alpha=0.7)
+    
+            bin_centers = (bins[:-1] + bins[1:]) / 2
+    
+            def gaussian_funtion(x, amp, mean, sigma):
+                return amp * np.exp(-(x - mean)**2 / (2 * sigma**2))
+    
+            p0 = [max(n), np.mean(self.residual_diff.flatten()), np.std(self.residual_diff.flatten())]
+    
+            popt, pcov = curve_fit(gaussian_funtion, bin_centers, n, p0=p0)
+    
+            x_curva = np.linspace(min(bins), max(bins), 100)
+            y_curva = gaussian_funtion(x_curva, *popt)
+    
+            # Print gaussian fit parameters
+            print(f"Gaussian Fit Parameters:")
+            print(f"Amplitude: {popt[0]:.2f}")
+            print(f"Mean: {popt[1]:.2f}")
+            print(f"Sigma: {popt[2]:.2f}") 
+    
+            plt.plot(x_curva, y_curva, 'r-', linewidth=2, label=f'Gaussian Fit\n$mu={popt[1]:.2f}, sigma={popt[2]:.2f}$')
+    
+            plt.title('Histogram of Residual Differences and Gaussian Fit')
+            plt.xlabel("Residual Intensity")
+            plt.ylabel("Frequency")
+            plt.grid(True)
+            plt.show() 
             
 class MTR2_sci:
     def __init__(self, filepath, mode):
@@ -410,13 +418,15 @@ class MTR2_sci:
         timestamp_dt = datetime.strptime(timestamp, "%Y%m%d%H%M%S")
         self.timestamp = timestamp_dt
         
-    def process_data(self, tform=None, s_factor=None, poly_coeffs_b1=None, poly_coeffs_b2=None,
-                     b1_flat=None, b2_flat=None, config_roi=None, dark_filepath=None, plot_check=False):
+    def process_data(self, tform=None, s_factor=None, poly_coeffs_b=None, poly_coeffs_b1=None, poly_coeffs_b2=None,
+                     b_flat=None, b1_flat=None, b2_flat=None, config_roi=None, dark_filepath=None, plot_check=False):
 
         self.tform = tform
         self.s_factor = s_factor
+        self.poly_coeffs_b = poly_coeffs_b
         self.poly_coeffs_b1 = poly_coeffs_b1
         self.poly_coeffs_b2 = poly_coeffs_b2
+        self.b_flat = b_flat
         self.b1_flat = b1_flat
         self.b2_flat = b2_flat
         self.config_roi = config_roi
@@ -429,6 +439,7 @@ class MTR2_sci:
             and resolves the Stokes I component from the modulation sequence.
             This version is for Stokes I only (no polarization).
             """
+            print("\nStarting the calibration and processing steps for Stokes I only...\n")
             # 1. Open with memmap=True (Do not use 'with' so the file stays mapped)
             hdul = fits.open(self.filepath)
             self.header = hdul[0].header
@@ -469,19 +480,19 @@ class MTR2_sci:
             
             for idx in tqdm(range(self.frames), desc="Profiling Frames", unit="frame"):
                 # 1. Get raw frame stats
-                    raw_b1 = raw_data_mapped[idx, :, :].astype(np.float32) + self.bzero
+                    raw_b = raw_data_mapped[idx, :, :].astype(np.float32) + self.bzero
                     
-                    avb[idx] = np.mean(raw_b1[self.y_start:self.y_end, self.x_start:self.x_end]) # Combined global mean equivalent
+                    avb[idx] = np.mean(raw_b[self.y_start:self.y_end, self.x_start:self.x_end]) # Combined global mean equivalent
             
                     # 2. Process frame just enough to grab the mean, then discard it from RAM
                     if dark_data is not None:
-                        raw_b1 -= dark_data[:, :]
+                        raw_b -= dark_data[:, :]
             
-                    if self.poly_coeffs_b1 is not None and self.config_roi is not None:
-                        raw_b1, _ = maping_coord(raw_b1, self.poly_coeffs_b1, self.config_roi['line_center_b1'], order=1, mode='nearest')
+                    if self.poly_coeffs_b is not None and self.config_roi is not None:
+                        raw_b, _ = maping_coord(raw_b, self.poly_coeffs_b, self.config_roi['line_center_b1'], order=1, mode='nearest')
         
-                    if b1_flat is not None:
-                        raw_b1 /= b1_flat
+                    if self.b_flat is not None:
+                        raw_b /= self.b_flat
                 
                     # Store only the 1D scalar vector tracks[cite: 5]
                     avb1[idx] = np.mean(raw_b1[self.y_start:self.y_end, self.x_start:self.x_end])
@@ -500,18 +511,18 @@ class MTR2_sci:
                    
                 frame_idx = s
             
-                b1_frame = raw_data_mapped[frame_idx, :, :].astype(np.float32) + self.bzero
+                b_frame = raw_data_mapped[frame_idx, :, :].astype(np.float32) + self.bzero
             
                 if dark_data is not None:
-                    b1_frame -= dark_data[:, :]
+                    b_frame -= dark_data[:, :]
             
-                if self.poly_coeffs_b1 is not None and self.config_roi is not None:
-                    b1_frame, _ = maping_coord(b1_frame, self.poly_coeffs_b1, self.config_roi['line_center_b1'], order=1, mode='nearest')
+                if self.poly_coeffs_b is not None and self.config_roi is not None:
+                    b_frame, _ = maping_coord(b_frame, self.poly_coeffs_b, self.config_roi['line_center_b1'], order=1, mode='nearest')
             
-                if b1_flat is not None:
-                    b1_frame /= b1_flat
+                if self.b_flat is not None:
+                    b_frame /= self.b_flat
             
-                self.scan_stokes[s, 0] = min_avb + ((b1_frame - min_avb1) * (max_avb - min_avb)) / (max_avb1 - min_avb1)
+                self.scan_stokes[s, 0] = min_avb + ((b_frame - min_avb1) * (max_avb - min_avb)) / (max_avb1 - min_avb1)
         
                 if self.input_local == 'no':
                     plt.ioff()
@@ -691,128 +702,88 @@ if __name__ == "__main__":
     print("3. Extract the final Stokes matrix from the science data.")
     print("Please follow the prompts to provide the necessary file paths.")
 
+    checking_calibration = 0
+
     no_pol = input("Do you want to process the data with or without polarization? (with/without): ").strip().lower()
     if no_pol == "without":
-        raw_file_darks = input("Enter the path and file of the dark (x3) (or leave blank if not available): ")
-        if raw_file_darks.strip() == "":
-            raw_file_darks = None
+        mode = 'non-pol'
+    elif no_pol == "with":
+        mode = 'pol'
+    else:
+        raise ValueError("Invalid input. Please enter 'with' or 'without'.")
+    
+    filename_dark = input("Enter the path and file of the dark (x3) (or leave blank if not available): ")
+    if filename_dark.strip() == "":
+        filename_dark = None
+    filenames_flat = input("Enter the path and file or files (* as regular expresion) of the flats (y3): ")
+    filenames_sci = input("Enter the path and file or files (* as regular expresion) of the science data (b3):")
+    list_raw_file_flats = glob.glob(filenames_flat)
+    list_raw_file_sci = glob.glob(filenames_sci)
+    list_flats=[]
 
-        raw_file_flats = input("Enter the path and file or files (* as regular expresion) of the flats (y3): ")
-        raw_file_sci = input("Enter the path and file or files (* as regular expresion) of the science data (b3):")
+    print("\nStarting the calibration and processing steps...\n")
+    for ff in list_raw_file_flats:
+        raw_file_flat = MTR2_flat(ff, mode=mode)
+        raw_file_flat.compute_calibration(dark_filepath=filename_dark)
+        if mode == 'pol':
+            print("Would you like to evaluate the flat-field calibration visually? (yes/no)")
+            evaluate_flats = input().strip().lower()
+            if evaluate_flats == "yes":
+                raw_file_flat.processed_flats_evaluation(plot_check=True)
+                print("Do you agree to proceed with the Stokes matrix extraction using the computed calibration? (yes/no)")
+                proceed_stokes = input().strip().lower()
+                if proceed_stokes != "yes":
+                    print("Process aborted by user. Exiting.")
+                    exit(0)     
+            else:
+                raw_file_flat.processed_flats_evaluation(plot_check=False)
+        list_flats.append(raw_file_flat)
 
-        if "*" in raw_file_flats and "*" in raw_file_sci:
-            import glob
-            raw_file_flats = glob.glob(raw_file_flats)
-            raw_file_sci = glob.glob(raw_file_sci)
+    for fc in list_raw_file_sci:
+        raw_file_sci = MTR2_sci(fc, mode=mode)
+        #Check the closest flat for this science file using timestamps
+        flat_ts_list = [flat.timestamp for flat in list_flats]
+        closest_flat_index = min(range(len(flat_ts_list)), key=lambda i: abs(flat_ts_list[i] - raw_file_sci.timestamp))
+        closest_flat = list_flats[closest_flat_index]
 
-            flat_timestamps = []
-
-            for flat_file in raw_file_flats:
-                print(f"Found flat file: {flat_file}")
-                timestamp = flat_file.split('/')[-1].split('_')[4] + flat_file.split('/')[-1].split('_')[5]
-                timestamp_dt = datetime.strptime(timestamp, "%Y%m%d%H%M%S")
-                flat_timestamps.append(timestamp_dt)
-
-            for sci_file in raw_file_sci:
-                print(f"Found science file: {sci_file}")
-                sci_timestamp = sci_file.split('/')[-1].split('_')[4] + sci_file.split('/')[-1].split('_')[5]
-                sci_timestamp_dt = datetime.strptime(sci_timestamp, "%Y%m%d%H%M%S")
-
-                closest_flat_index = min(range(len(flat_timestamps)), key=lambda i: abs(flat_timestamps[i] - sci_timestamp_dt))
-                closest_flat_file = raw_file_flats[closest_flat_index]
-
-                config_roi, poly_coeffs_b, b_flat_norm = compute_calibration_nopol(closest_flat_file, dark_filepath=raw_file_darks, plot_check=True)
-
-                
-
-        
-        elif "*" not in raw_file_flats and "*" in raw_file_sci:
-            import glob
-            raw_file_sci = glob.glob(raw_file_sci)
+        raw_file_sci.process_data(tform=closest_flat.tform, s_factor=closest_flat.s_factor,
+                                  poly_coeffs_b=closest_flat.poly_coeffs_b, poly_coeffs_b1=closest_flat.poly_coeffs_b1,
+                                  poly_coeffs_b2=closest_flat.poly_coeffs_b2, b_flat=closest_flat.b_flat,
+                                  b1_flat=closest_flat.b1_flat, b2_flat=closest_flat.b2_flat, config_roi=closest_flat.config_roi,
+                                  dark_filepath=filename_dark)
 
 
-        else:
-            print("\nStarting the calibration and processing steps for Stokes I only...\n")
-            # Step 1: Compute alignment and scale factor (handling darks first if present)
-            config_roi, poly_coeffs_b, b_flat_norm = compute_calibration_nopol(raw_file_flats, dark_filepath=raw_file_darks, plot_check=True)
+        print(f"Processing of science file {fc} completed.\n")
+        print(f"Final Stokes Cube Shape: {raw_file_sci.stokes_cube.shape}")
 
-            print("Do you agree to proceed with the Stokes I extraction using the computed calibration? (yes/no)")
+        if checking_calibration == 0:
+            if mode == "non-pol":
+                plt.ioff()
+                fig, ax = plt.subplots(nrows=1, ncols=1, sharex=True, sharey=True)
+                stokes_labels = ['I']
+                ax.imshow(raw_file_sci.stokes_cube[0, 0, :,:], cmap='gray', origin='lower')
+                ax.set_title(f"Stokes {stokes_labels[0]}")
+                plt.tight_layout()
+                plt.show()
+            else:
+                plt.ioff()
+                fig, ax = plt.subplots(nrows=2, ncols=2, sharex=True, sharey=True)
+                stokes_labels = ['I', 'Q', 'U', 'V']
+                for i in range(4):
+                    ax[i//2, i%2].imshow(raw_file_sci.stokes_cube[0, i, :,:], cmap='gray', origin='lower')
+                    ax[i//2, i%2].set_title(f"Stokes {stokes_labels[i]}")
+                plt.tight_layout()
+                plt.show()
+
+            print("Do you agree to proceed with the calibration of the science files? (yes/no)")
             proceed_stokes = input().strip().lower()
             if proceed_stokes != "yes":
                 print("Process aborted by user. Exiting.")
-                exit(0)     
-
-            # Step 2: Extract final Stokes I matrix (handling darks first if present)
-            print("Extracting the final Stokes I matrix from the science data...")
-            stokes_cube, fits_header = process_science_data_nopol(raw_file_sci, tform_matrix=None, s_factor=None, poly_coeffs_b1=poly_coeffs_b, 
-                                                            config_roi=config_roi, dark_filepath=raw_file_darks, b1_flat=b_flat_norm, b2_flat=None)
-
-            print(f"Final Stokes Cube Shape: {stokes_cube.shape}")
-
-    else:
-
-        raw_file_flats = input("Enter the path and file of the flats (y3):")
-        raw_file_darks = input("Enter the path and file of the darks (x3) (or leave blank if not available): ")
-        if raw_file_darks.strip() == "":
-            raw_file_darks = None
-        raw_file_sci = input("Enter the path and file of the science data (b3):")
-
-        print("\nStarting the calibration and processing steps...\n")
-        # Step 1: Compute alignment and scale factor (handling darks first if present)
-        tform_matrix, s, config_roi, poly_coeffs_b1, poly_coeffs_b2, b1_flat_norm, b2_flat_norm = compute_calibration(raw_file_flats, dark_filepath=raw_file_darks)
-
-        # Step 1.1 (Optional) Evaluate the calibration visually
-        print("Would you like to evaluate the flat-field calibration visually? (yes/no)")
-        evaluate_flats = input().strip().lower()
-        if evaluate_flats == "yes":
-            flat_mean = process_flats_eval(raw_file_flats, tform_matrix, s, poly_coeffs_b1=poly_coeffs_b1, poly_coeffs_b2=poly_coeffs_b2, config_roi=config_roi, dark_filepath=raw_file_darks, plot_check=True)
-        else:
-            flat_mean = process_flats_eval(raw_file_flats, tform_matrix, s, poly_coeffs_b1=poly_coeffs_b1, poly_coeffs_b2=poly_coeffs_b2, config_roi=config_roi, dark_filepath=raw_file_darks, plot_check=False)
-                    
-
-        print("Do you agree to proceed with the Stokes matrix extraction using the computed calibration? (yes/no)")
-        proceed_stokes = input().strip().lower()
-        if proceed_stokes != "yes":
-            print("Process aborted by user. Exiting.")
-            exit(0)     
-
-        # Step 2: Extract final Stokes matrix (handling darks first if present)
-        print("Extracting the final Stokes matrix from the science data...")
-        stokes_cube, fits_header = process_science_data(raw_file_sci, tform_matrix, s, poly_coeffs_b1=poly_coeffs_b1, poly_coeffs_b2=poly_coeffs_b2, 
-                                                        config_roi=config_roi, dark_filepath=raw_file_darks, b1_flat=b1_flat_norm, b2_flat=b2_flat_norm)
-
-
-        print(f"Final Stokes Cube Shape: {stokes_cube.shape}")
-        print("Displaying the Stokes parameters for visual inspection...")
-
-        if no_pol == "yes":
-            plt.ioff()
-            fig, ax = plt.subplots(nrows=1, ncols=1, sharex=True, sharey=True)
-            stokes_labels = ['I']
-            ax.imshow(stokes_cube[0, 0, :,:], cmap='gray', origin='lower')
-            ax.set_title(f"Stokes {stokes_labels[0]}")
-            plt.tight_layout()
-            plt.show()
-        else:
-            plt.ioff()
-            fig, ax = plt.subplots(nrows=2, ncols=2, sharex=True, sharey=True)
-            stokes_labels = ['I', 'Q', 'U', 'V']
-            for i in range(4):
-                ax[i//2, i%2].imshow(stokes_cube[0, i, :,:], cmap='gray', origin='lower')
-                ax[i//2, i%2].set_title(f"Stokes {stokes_labels[i]}")
-            plt.tight_layout()
-            plt.show()
-
-    ## Save output
-    print("Do you agree to save the clean Stokes parameters to a FITS file? (yes/no)")
-    if input().strip().lower() == "yes":
-        file_name = input("Enter the desired output filename (e.g., 'stokes.fits'): ").strip()
-        save_stokes = "yes"
-    else:
-        save_stokes = "no"
-        exit(0)
-
-    if save_stokes == "yes":
+                exit(0)
+            else:
+                checking_calibration = 1
+            
+        file_name = 'stk_' + raw_file_sci.filepath.split('/')[-1]
         sci_file_hdu = fits.open(raw_file_sci)
         fits_header = sci_file_hdu[0].header.copy()  # Copy the original header to preserve metadata
         sci_file_hdu.close()
@@ -820,11 +791,11 @@ if __name__ == "__main__":
         fits_header['HISTORY'] = 'Processed with MTR2 pipeline'
         fits_header['DATE'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         fits_header['NAXIS'] = 4
-        fits_header['NAXIS1'] = stokes_cube.shape[3]  #Width
-        fits_header['NAXIS2'] = stokes_cube.shape[2]  #Height
-        fits_header['NAXIS3'] = stokes_cube.shape[1]  #Stokes parameters
-        fits_header['NAXIS4'] = stokes_cube.shape[0]  #Scans
-        if no_pol == "without":
+        fits_header['NAXIS1'] = raw_file_sci.stokes_cube.shape[3]  #Width
+        fits_header['NAXIS2'] = raw_file_sci.stokes_cube.shape[2]  #Height
+        fits_header['NAXIS3'] = raw_file_sci.stokes_cube.shape[1]  #Stokes parameters
+        fits_header['NAXIS4'] = raw_file_sci.stokes_cube.shape[0]  #Scans
+        if mode == "non-pol":
             fits_header['NOPOL'] = 'yes'
             fits_header['SCALE'] = None
             fits_header['STOKES'] = 'I'
@@ -839,21 +810,21 @@ if __name__ == "__main__":
             flat_mean = None
         else:
             fits_header['NOPOL'] = 'no'
-            fits_header['SCALE'] = s
-            matrix = tform_matrix.params
+            fits_header['SCALE'] = raw_file_sci.s_factor
+            matrix = raw_file_sci.tform_matrix.params
             fits_header["CRPIX1"] = float(matrix[0][2])  # X translation/offset
             fits_header["CRPIX2"] = float(matrix[1][2])  # Y translation/offset
             fits_header["CD1_1"] = float(matrix[0][0])  # X scaling/rotation
             fits_header["CD1_2"] = float(matrix[0][1])
             fits_header["CD2_1"] = float(matrix[1][0])
             fits_header["CD2_2"] = float(matrix[1][1])
-            fits_header['POLYB1'] = str(poly_coeffs_b1)
-            fits_header['POLYB2'] = str(poly_coeffs_b2)
+            fits_header['POLYB1'] = str(raw_file_sci.poly_coeffs_b1)
+            fits_header['POLYB2'] = str(raw_file_sci.poly_coeffs_b2)
             fits_header['STOKES'] = 'IQUV'
 
-        hdu = fits.PrimaryHDU(stokes_cube, header=fits_header)
+        hdu = fits.PrimaryHDU(raw_file_sci.stokes_cube, header=fits_header)
         hdul = fits.HDUList([hdu])
-        flat_hdu = fits.ImageHDU(data=flat_mean, header=fits_header)
+        flat_hdu = fits.ImageHDU(data=raw_file_sci.flat_mean, header=fits_header)
         hdul.append(flat_hdu)
         hdul.writeto(file_name, overwrite=True)
         print(f"Successfully saved clean Stokes parameters to '{file_name}'")
