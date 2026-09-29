@@ -76,6 +76,14 @@ class spect_check():
             cax1 = divider.append_axes('right', size='5%', pad="1%")
             self.cb1=self.fig.colorbar(self.p1, cax=cax1, orientation='vertical')
 
+            #if isinstance(self.contour_image, bool) == False:
+            #    self.X = np.arange(0,self.cube_shape[2],1)
+            #    self.Y = np.arange(0,self.cube_shape[1],1)
+            #    self.p2 = self.ax0.contour(self.X,self.Y,self.contour_image, levels=self.levels)
+            #    cax2 = divider.append_axes('top', size='5%', pad="1%")
+            #    self.cb2=self.fig.colorbar(self.p2, cax=cax2, orientation='horizontal')
+            #    cax2.xaxis.set_ticks_position("top")
+
             self.ax1.plot(self.wl, self.stokes_fov_avg[0]/self.cont, color='orange', label='Mean')
             self.ax2.plot(self.wl, self.stokes_fov_avg[1]/self.cont, color='orange', label='Mean')
             self.ax3.plot(self.wl, self.stokes_fov_avg[2]/self.cont, color='orange', label='Mean')
@@ -522,7 +530,7 @@ if __name__ == "__main__":
         checking_obs_inv=spect_inv_check(stk_data_obs, stk_data_inv, inv_models=hdul_inv[0].data)
         checking_obs_inv.set_parameters(stk_data_wl_obs*10)
         checking_obs_inv.inspect(chi=False)
-        checking_obs_inv.chi_calculation_specific(line=6302.5, width=0.4)
+        #checking_obs_inv.chi_calculation_specific(line=6302.5, width=0.4)
         checking_obs_inv.check_infered_model()
 
     else:

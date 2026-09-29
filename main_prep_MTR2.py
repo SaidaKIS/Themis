@@ -701,7 +701,8 @@ if __name__ == "__main__":
         raw_file_flats = input("Enter the path and file of the flats (y3):")
         raw_file_darks = input("Enter the path and file of the darks (x3) (or leave blank if not available): ")
         if raw_file_darks.strip() == "":
-            raw_file_darks = None
+            raw_file_darks = None 
+        
         raw_file_sci = input("Enter the path and file of the science data (b3):")
 
         print("\nStarting the calibration and processing steps for Stokes I only...\n")

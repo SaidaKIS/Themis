@@ -7,10 +7,12 @@ import sys
 from astropy.wcs import WCS
 import os
 from matplotlib.widgets import SpanSelector
+from scipy.interpolate import interp1d
 import warnings
 import pandas as pd
 warnings.filterwarnings("ignore")
 os.environ["QT_LOGGING_RULES"] = "qt.qpa.wayland*=false"
+#import hapi as ha
 
 #Code seeks to calibrate the wavelength axis of the observed data using the solar and telluric reference atlas
 #Using the rest spectrum of the observed data, we consider several options to find the best matching region of the reference atlas with the observed data. 
@@ -19,6 +21,65 @@ os.environ["QT_LOGGING_RULES"] = "qt.qpa.wayland*=false"
 #The user defines first the central wavelength of the observed data range to be calibrated and the number of telluric lines in the observed data range. 
 #The code then finds the best matching region of the solar and telluric reference atlas with the rest spectrum of the observed data.
 
+#def telluric_cal_hitran(wl_range):
+#
+#    wn_min = 1e7 / wl_range[1]  # Convert wavelength range to wavenumber range (cm^-1)
+#    wn_max = 1e7 / wl_range[0]  # Convert wavelength range to wavenumber range (cm^-1)
+#
+#    ha.fetch('O2_630nm', M=7, I=1, numin=wn_min, numax=wn_max)
+#    ha.fetch('H2O_630nm', M=1, I=1, numin=wn_min, numax=wn_max)
+#
+#    # 2. Define the wavenumber grid for the simulation (high resolution)
+#    nu_grid = np.arange(wn_min, wn_max, 0.01)
+#
+#    nu_o2, coef_o2 = ha.absorptionCoefficient_Voigt(
+#    SourceTables=['O2_630nm'],
+#    Components=[(7, 1, 1.0)],  
+#    WavenumberGrid=nu_grid,
+#    Environment={'p': 1.0, 'T': 296.0})
+#
+#    nu_h2o, coef_h2o = ha.absorptionCoefficient_Voigt(
+#    SourceTables=['H2O_630nm'],
+#    Components=[(1, 1, 1.0)],  
+#    WavenumberGrid=nu_grid,
+#    Environment={'p': 1.0, 'T': 296.0})
+#
+#    col_density_o2 = 0.21 * 2.15e25
+#    col_density_h2o = 0.01 * 2.15e25
+#
+#    # Optical depth is the product of cross section (cm^2) and column density (1/cm^2)
+#    tau = (coef_o2 * col_density_o2) + (coef_h2o * col_density_h2o)
+#    transmittance = np.exp(-tau)
+#
+#    # 4. Convert the grid from wavenumbers (cm-1) back to vacuum wavelength (nm)
+#    wavelength_vac_nm = 1e7 / nu_o2
+#
+#    # --- ADDED: Convert Vacuum Wavelength to Air Wavelength (Morton 2000) ---
+#    wavelength_vac_A = wavelength_vac_nm * 10.0  # Formula requires Angstroms
+#    s = 10000.0 / wavelength_vac_A
+#    
+#    # Calculate refractive index of air (n)
+#    n = 1.0 + 0.0000834254 + (0.02406147 / (130.0 - s**2)) + (0.00015998 / (38.9 - s**2))
+#    
+#    # Apply correction and convert back to nanometers
+#    wavelength_air_nm = (wavelength_vac_A / n) / 10.0
+#
+#    #mask = (wavelength_air_nm >= 630.15) & (wavelength_air_nm <= 630.3)
+#    #wavelength = wavelength_air_nm[mask]
+#    #transmittance_corr = transmittance[mask]
+#
+#        
+#    # 5. Plot the calculated absorption spectrum
+#    plt.figure(figsize=(10, 5))
+#    plt.plot(wavelength_vac_nm[::-1], transmittance, color='crimson', lw=2, label='O₂ Transmittance Spectrum')
+#    plt.xlabel('Wavelength (nm)', fontsize=12)
+#    plt.ylabel('Transmittance', fontsize=12)
+#    #plt.title('Simulated Telluric O₂ Absorption Spectrum ({} - {} nm)'.format(wavelength[0], wavelength[-1]), fontsize=14)
+#    plt.grid(True, linestyle='--', alpha=0.6)
+#    plt.legend()
+#    plt.tight_layout()
+#    plt.show() 
+#
 def lc_core(spect,si,sf,num):
     """
     Finding the line core center
@@ -45,6 +106,46 @@ def lc_core(spect,si,sf,num):
     cent = cent + cent1 - numh
     out=[cent,io]
     return out
+
+def widen_multiple_lines(wavelength, flux, line_centers, stretch_factor, window_size=5.0):
+    """
+    Widens multiple spectral lines individually by the same stretch_factor
+    without altering their central wavelengths or maximum depths.
+    
+    Parameters:
+    - wavelength, flux: Input spectrum arrays (continuum assumed at 1.0).
+    - line_centers: List or array of central wavelengths for each line.
+    - stretch_factor: How much to widen the lines (e.g., 1.5).
+    - window_size: The local wavelength width around each center to apply the stretch.
+    """
+    # Start with a copy of the original depth profile
+    total_depth = 1.0 - flux
+    new_total_depth = np.zeros_like(total_depth)
+    
+    # Process each line independently
+    for center in line_centers:
+        # Create a mask to isolate the local window around the current line
+        mask = (wavelength >= (center - window_size)) & (wavelength <= (center + window_size))
+        
+        if not np.any(mask):
+            continue
+            
+        wl_local = wavelength[mask]
+        depth_local = total_depth[mask]
+        
+        # Stretch local coordinates relative to this specific line's center
+        stretched_wl_local = center + stretch_factor * (wl_local - center)
+        
+        # Interpolate the stretched local line back onto the original local grid
+        interp_func = interp1d(stretched_wl_local, depth_local, kind='cubic', 
+                               bounds_error=False, fill_value=0.0)
+        
+        # Add the modified line depth to our clean output array
+        new_total_depth[mask] += interp_func(wl_local)
+        
+    # Convert the combined stretched depths back to normalized flux
+    new_flux = 1.0 - new_total_depth
+    return new_flux
 
 class rectangle_selector:
     def __init__(self, img):
@@ -275,10 +376,10 @@ def main():
     #Not all field of view should be use to calculate the rest spectrum, 
     # we should select a custom region visualy with the rectangle selector.
     img = stokes_cube[0].data[:, 0, :, 50]
-    flat = stokes_cube[1].data
-    flat_spect = np.mean(flat, axis=0)
-    flat_spect = flat_spect / np.max(flat_spect)  # Normalize the flat field spectrum
-    flat_spect = flat_spect[::-1]  # Flip the wavelength axis to match the reference atlas
+    #flat = stokes_cube[1].data
+    #flat_spect = np.mean(flat, axis=0)
+    #flat_spect = flat_spect / np.max(flat_spect)  # Normalize the flat field spectrum
+    #flat_spect = flat_spect[::-1]  # Flip the wavelength axis to match the reference atlas
     
     selector = rectangle_selector(img)
     plt.show()
@@ -300,6 +401,21 @@ def main():
     solar_region_mask = (solar_atlas[0, :] >= observed_data_range[0]) & (solar_atlas[0, :] <= observed_data_range[1])
     solar_region_wavelengths = solar_atlas[0, solar_region_mask]
     solar_region_intensities = solar_atlas[1, solar_region_mask]
+
+    #check with the new solar_atlas_v2
+    print(f"Observed data range: {observed_data_range}")
+    solar_region_mask_v2 = (solar_atlas_v2[0, :] >= observed_data_range[0]) & (solar_atlas_v2[0, :] <= observed_data_range[1])
+    solar_region_wavelengths_v2 = solar_atlas_v2[0, solar_region_mask_v2]
+    solar_region_intensities_v2 = solar_atlas_v2[1, solar_region_mask_v2]
+
+    #plt.figure()
+    #plt.plot(solar_region_wavelengths, solar_region_intensities, label='Solar Atlas')
+    #plt.plot(solar_region_wavelengths_v2, solar_region_intensities_v2, label='Solar Atlas v2')
+    #plt.xlabel('Wavelength (nm)')
+    #plt.ylabel('Intensity')
+    #plt.title('Solar Atlas Comparison')
+    #plt.legend()
+    #plt.show()
 
     #for the telluric reference atlas, we will use the wavelength range of the observed data range.
     telluric_region_mask = (telluric_atlas[0, :] >= observed_data_range[0]) & (telluric_atlas[0, :] <= observed_data_range[1])
@@ -330,7 +446,7 @@ def main():
     # the wavelength-calibrated observed data with the solar and telluric reference atlas.
     fig, ax = plt.subplots(nrows= 1, ncols=1, sharex=True, figsize=(10, 8))
     ax.plot(wavelength_calibrated, rest_spectrum, color='red', label='Wavelength-Calibrated Observed Data')
-    ax.plot(wavelength_calibrated, flat_spect, color='black', linestyle='--', label='Wavelength-Calibrated Grand Flat Data')
+    #ax.plot(wavelength_calibrated, flat_spect, color='black', linestyle='--', label='Wavelength-Calibrated Grand Flat Data')
     ax.plot(solar_region_wavelengths, solar_region_intensities, color='blue', linestyle='--', label='Solar Reference Atlas')
     ax.plot(telluric_region_wavelengths, telluric_region_intensities, color='green', linestyle='--', label='Telluric Reference Atlas')
     ax.set_title("Wavelength-Calibrated Observed Data - Comparison with Solar and Telluric Reference Atlas")
@@ -341,12 +457,36 @@ def main():
     plt.show()
 
 
+    #Test to rid out of the telluric lines from the wavelength-calibrated observed data.
+    #First, we need to equaly sample the telluric reference atlas to match the wavelength grid of the observed data.
+    
+    #telluric_interpolator = interp1d(telluric_region_wavelengths, telluric_region_intensities, kind='linear', bounds_error=False, fill_value="extrapolate")
+    #telluric_region_intensities_resampled = telluric_interpolator(wavelength_calibrated)
+    #
+    ##use the widen_multiple_lines function to stretch the telluric lines
+    #telluric_region_intensities_stretched = widen_multiple_lines(wavelength_calibrated, telluric_region_intensities_resampled, central_wavelengths_atlas, stretch_factor=1.65, window_size=0.03)
+#
+    #rest_spectrum_corrected = rest_spectrum - (telluric_region_intensities_stretched - 1)
+    ##plot the corrected spectrum to check the result
+    #fig, ax = plt.subplots(nrows= 1, ncols=1, sharex=True, figsize=(10, 8))
+    #ax.plot(wavelength_calibrated, rest_spectrum_corrected, color='red', label='Telluric-Corrected Observed Data')
+    #ax.set_title("Telluric-Corrected Observed Data")
+    #ax.set_xlabel("Wavelength (nm)")
+    #ax.set_ylabel("Intensity")
+    #ax.legend()
+    #plt.tight_layout()
+    #plt.show()
+
+
+
     #the final step is to create a full cube of the wavelength-calibrated observed data and save it as a new fits file. 
     #The new fits file will have a shape of [stokes, y (spatial dimension), x(scans), wavelength] including the new scale of calibrated wavelengths and it will have the same header as the original observed data file, but with the updated wavelength axis.
     #Remember: [scans, stokes, y, x]
     #We also add a binning of the wavelenght to avoid oversampling and reduce the data size.
     scans, stokes, y, wavelenght = stokes_cube[0].data.shape
     print(f"Original Stokes cube shape: {stokes_cube[0].data.shape}")
+
+    
     wavelenght_binned = wavelenght // 2  # update the wavelength dimension after binning
     wavelength_calibrated_cube = np.zeros_like(np.zeros([stokes, y, scans, wavelenght_binned]), dtype=np.float32)
     if wavelenght % 2 != 0:
@@ -402,5 +542,12 @@ def main():
     hdul.append(wavelength_hdu)
     hdul.writeto(new_fits_file, overwrite=True)
 
+
+
 if __name__ == "__main__":
     main()
+
+
+
+
+
