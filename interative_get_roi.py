@@ -153,7 +153,7 @@ def get_roi(flat_data, no_pol=False):
     else:
         height, width = flat_data.shape
         half_y = height // 2
-        border_calc(flat_data, no_pol=no_pol)
+        arcperpix=border_calc(flat_data, no_pol=no_pol)
 
         # Slice the flat data into Top and Bottom fields 
         f1 = flat_data[0:half_y, :]
