@@ -6,6 +6,65 @@ import matplotlib
 matplotlib.use('TkAgg') # Can also change to 'TkAgg' depending on system setup
 import matplotlib.pyplot as plt
 from astropy.io import fits
+from skimage import filters
+from scipy.signal import find_peaks
+import sys
+
+def border_calc(flat_data, no_pol=False, slit_size=55):
+    height, width = flat_data.shape    
+    if no_pol:
+        f = flat_data[: , :]
+        edges = filters.sobel(f)
+        v_strip = edges[:,width//2]
+        peaks, _ = find_peaks(v_strip, distance=width//4)
+        if len(peaks) > 2:
+            r_border = [x for x in peaks if 10 < x < height - 10]
+            if len(r_border) == 2:
+                diff = np.abs(r_border[1] - r_border[0])
+                arcpix = np.round(slit_size/diff, 4)
+            else:
+                r_border = [x for x in peaks if 20 < x < height - 20]
+                if len(r_border) == 2:
+                    diff = np.abs(r_border[1] - r_border[0])
+                    arcpix = np.round(slit_size/diff, 4)
+                else:
+                    raise ValueError("No borders found")
+
+        elif len(peaks) == 2:
+            r_border = peaks
+            diff = np.abs(r_border[1] - r_border[0])
+            arcpix = np.round(slit_size/diff, 4)
+
+        else:
+            raise ValueError("No borders found")
+        
+    else:
+        half_y = height // 2
+        f = flat_data[0:half_y, :]
+        edges = filters.sobel(f)
+        v_strip = edges[:,width//2]
+        peaks, _ = find_peaks(v_strip, distance=width//4)
+        if len(peaks) > 2:
+            r_border = [x for x in peaks if 10 < x < height - 10]
+            if len(r_border) == 2:
+                diff = np.abs(r_border[1] - r_border[0])
+                arcpix = np.round(slit_size/diff, 4)
+            else:
+                r_border = [x for x in peaks if 20 < x < height - 20]
+                if len(r_border) == 2:
+                    diff = np.abs(r_border[1] - r_border[0])
+                    arcpix = np.round(slit_size/diff, 4)
+                else:
+                    raise ValueError("No borders found")
+        elif len(peaks) == 2:
+            r_border = peaks
+            diff = np.abs(r_border[1] - r_border[0])
+            arcpix = np.round(slit_size/diff, 4)
+
+        else:
+            raise ValueError("No borders found")
+
+    return arcpix  
 
 def get_roi(flat_data, no_pol=False):
     """
@@ -26,14 +85,18 @@ def get_roi(flat_data, no_pol=False):
             "line_center_b2": int,           # Beam 2 line center (global coordinates)
             "lrg2": [top_row, bottom_row],   # Beam 2 final crop
             "crg2": [left_col, right_col]    # Beam 2 final crop
+            "arcperpix": Measures the distance between the edges of the beams and give a value of arcsec per pixel
         }
 
     """
     if no_pol:
         # If no polarization, we can treat the entire flat_data as a single beam
         height, width = flat_data.shape
+        arcperpix = border_calc(flat_data, no_pol=no_pol)
+
         f1 = flat_data[: , :]
 
+        
         plt.ion()
 
         # =========================================================================
@@ -84,18 +147,20 @@ def get_roi(flat_data, no_pol=False):
             "line_center_b2": None,       # Beam 2 line center
             "lrg2": None,                     # [top_row, bottom_row] Beam 2 final crop
             "crg2": None,                      # [left_col, right_col] Beam 2 final crop
+            "arcperpix" : arcperpix
         }
 
     else:
         height, width = flat_data.shape
         half_y = height // 2
-
-        # Enable interactive plotting mode
-        plt.ion()
+        border_calc(flat_data, no_pol=no_pol)
 
         # Slice the flat data into Top and Bottom fields 
         f1 = flat_data[0:half_y, :]
         f2 = flat_data[half_y:, :]
+
+        # Enable interactive plotting mode
+        plt.ion()
 
         # =========================================================================
         # STEP 2: Beam 1 (Top Field) Line Core Selection (c1wrg, l1wrg)
@@ -195,7 +260,8 @@ def get_roi(flat_data, no_pol=False):
             "l2wrg" : l2wrg,                     # [bottom_row, top_row] Beam 2 line core
             "line_center_b2": line_center_b2,       # Beam 2 line center
             "lrg2": lrg2,                     # [top_row, bottom_row] Beam 2 final crop
-            "crg2": crg2                      # [left_col, right_col] Beam 2 final crop
+            "crg2": crg2,                      # [left_col, right_col] Beam 2 final crop
+            "arcperpix" : arcperpix
         }
 
     print("\n--- Interactive Selection Complete ---")
