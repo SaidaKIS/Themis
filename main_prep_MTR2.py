@@ -797,6 +797,7 @@ if __name__ == "__main__":
         fits_header['NAXIS2'] = stokes_cube.shape[2]  #Height
         fits_header['NAXIS3'] = stokes_cube.shape[1]  #Stokes parameters
         fits_header['NAXIS4'] = stokes_cube.shape[0]  #Scans
+        fits_header['CDELT2'] = config_roi['arcperpix']
         if no_pol == "without":
             fits_header['NOPOL'] = 'yes'
             fits_header['SCALE'] = None
