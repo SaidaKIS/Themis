@@ -51,14 +51,14 @@ class spect_check():
         self.pix_size = pix_size
         self.cont = cont_value
 
+        scale_x = pix_size[0]  
+        scale_y = pix_size[1]
+        xmin, ymin = 0.0, 0.0  # Starting coordinates
+
+        self.ny, self.nx = self.bg_map.shape
+        self.extent_plot = [xmin, xmin + self.nx * scale_x, ymin, ymin + self.ny * scale_y]
         self.wl=np.array(self.scan_pos)
 
-        #self.vel_scan_pos=np.round(wl2v(self.lam, self.wl),1)
-        self.arcsec_x=np.linspace(start=0, stop=self.cube_shape[2], num=8)
-        self.arcsec_y=np.linspace(start=0, stop=self.cube_shape[1], num=8)
-        self.pix2arc_x=np.around(self.arcsec_y*self.pix_size[0],2)
-        self.pix2arc_y=np.around(self.arcsec_x*self.pix_size[1],2)
-    
     def inspect(self, cmap_context='gray'):
         self.cmap_bg = cmap_context
         
@@ -71,10 +71,12 @@ class spect_check():
             self.ax3 = self.fig.add_subplot(spec[2, 1])
             self.ax4 = self.fig.add_subplot(spec[3, 1])
 
-            self.p1 = self.ax0.imshow(self.bg_map, origin='lower', cmap=self.cmap_bg, aspect='auto')
+            self.p1 = self.ax0.imshow(self.bg_map, origin='lower', cmap=self.cmap_bg, aspect='equal', extent=self.extent_plot)
             divider = make_axes_locatable(self.ax0)
             cax1 = divider.append_axes('right', size='5%', pad="1%")
             self.cb1=self.fig.colorbar(self.p1, cax=cax1, orientation='vertical')
+            self.ax0.set_xlabel("Scan (arcsec)")
+            self.ax0.set_ylabel("Slit (arcsec)")
 
             #if isinstance(self.contour_image, bool) == False:
             #    self.X = np.arange(0,self.cube_shape[2],1)
@@ -118,7 +120,7 @@ class spect_check():
             self.ax1.set_ylim([0.0,1.1])
             self.ax2.set_ylim([-0.05,0.05])
             self.ax3.set_ylim([-0.05,0.05])
-            self.ax4.set_ylim([-0.3,0.3])
+            self.ax4.set_ylim([-0.1,0.1])
 
             self.ax1.set_xlim([self.wl[0],self.wl[-1]])
             self.ax2.set_xlim([self.wl[0],self.wl[-1]])
@@ -176,7 +178,11 @@ class spect_check():
         
     def pointing1(self, event):
         if event.inaxes == self.ax0 and event.xdata is not None:
-            x1, y1 = int(event.xdata), int(event.ydata)
+            xmin, xmax = self.ax0.get_xlim()
+            ymin, ymax = self.ax0.get_ylim()
+
+            x1 = int((event.xdata - xmin) / (xmax - xmin) * self.nx)
+            y1 = int((event.ydata - ymin) / (ymax - ymin) * self.ny)
         
             # Array bound safety
             if 0 <= y1 < self.cube_shape[1] and 0 <= x1 < self.cube_shape[2]:
@@ -248,7 +254,7 @@ class spect_inv_check():
         self.cube_obs = np.array(cube_obs)
         self.stokes_fov_avg = np.nanmean(self.cube_obs, axis=(1,2))
         self.cube_shape = self.cube_obs.shape
-        self.bg_map = self.cube_obs[0,:,:,0] 
+        self.bg_map = self.cube_obs[0,:,:,0]
 
         if isinstance(cube_inv, bool) == False:
             self.cube_inv = np.transpose(cube_inv[0], (2, 0, 1, 3))
@@ -263,7 +269,7 @@ class spect_inv_check():
         if isinstance(inv_models, bool) == False:
             self.inv_models = np.array(inv_models)
     
-    def set_parameters(self, scan_pos, lam=None, cont_value=1, pix_size=1):
+    def set_parameters(self, scan_pos, lam=None, cont_value=1, pix_size=(1,1)):
         self.scan_pos = scan_pos
         self.lam = lam
         self.pix_size = pix_size
@@ -271,11 +277,13 @@ class spect_inv_check():
     
         self.wl=np.array(self.scan_pos)
 
-        #self.vel_scan_pos=np.round(wl2v(self.lam, self.wl),1)
-        self.arcsec_x=np.linspace(start=0, stop=self.cube_shape[2], num=8)
-        self.arcsec_y=np.linspace(start=0, stop=self.cube_shape[1], num=8)
-        self.pix2arc_x=np.around(self.arcsec_y*self.pix_size,2)
-        self.pix2arc_y=np.around(self.arcsec_x*self.pix_size,2)
+        scale_x = pix_size[0]  
+        scale_y = pix_size[1]
+        xmin, ymin = 0.0, 0.0  # Starting coordinates
+
+        self.ny, self.nx = self.bg_map.shape
+        self.extent_plot = [xmin, xmin + self.nx * scale_x, ymin, ymin + self.ny * scale_y]
+        self.wl=np.array(self.scan_pos)
         
     def inspect(self, chi=False, cmap_context='gray'):
         self.cmap_bg = cmap_context
@@ -288,13 +296,13 @@ class spect_inv_check():
         self.ax3 = self.fig.add_subplot(spec[2, 1])
         self.ax4 = self.fig.add_subplot(spec[3, 1])
         if chi != True: 
-            self.p1 = self.ax0.imshow(self.bg_map.T, origin='lower', cmap=self.cmap_bg, aspect='auto')
+            self.p1 = self.ax0.imshow(self.bg_map.T, origin='lower', cmap=self.cmap_bg, aspect='equal', extent=self.extent_plot)
             divider = make_axes_locatable(self.ax0)
             cax1 = divider.append_axes('right', size='5%', pad="1%")
             self.cb1=self.fig.colorbar(self.p1, cax=cax1, orientation='vertical')
         else:
             self.chi_calculation_full()
-            self.p1 = self.ax0.imshow(self.chi_cube_full.T, origin='lower', aspect='auto')
+            self.p1 = self.ax0.imshow(self.chi_cube_full.T, origin='lower', aspect='equal', extent=self.extent_plot)
             divider = make_axes_locatable(self.ax0)
             cax1 = divider.append_axes('right', size='5%', pad="1%")
             self.cb1=self.fig.colorbar(self.p1, cax=cax1, orientation='vertical')
@@ -359,7 +367,11 @@ class spect_inv_check():
 
     def pointing1(self, event):
         if event.inaxes == self.ax0 and event.xdata is not None:
-            y1, x1 = int(event.xdata), int(event.ydata)
+            xmin, xmax = self.ax0.get_xlim()
+            ymin, ymax = self.ax0.get_ylim()
+
+            x1 = int((event.xdata - xmin) / (xmax - xmin) * self.nx)
+            y1 = int((event.ydata - ymin) / (ymax - ymin) * self.ny)
         
             # Array bound safety
             if 0 <= y1 < self.cube_shape[1] and 0 <= x1 < self.cube_shape[2]:
@@ -502,15 +514,15 @@ class spect_inv_check():
         plt.subplot(1, 3, 1)
         B_long = self.inv_models[0, :, :, 0]*np.cos(self.inv_models[0, :, :, 1])
         B_tran = self.inv_models[0, :, :, 0]*np.sin(self.inv_models[0, :, :, 1])
-        plt.imshow(-B_long, origin='lower', cmap='RdBu_r', aspect='auto', vmin=-700, vmax=700)
+        plt.imshow(-B_long, origin='lower', cmap='RdBu_r', vmin=-700, vmax=700, aspect='equal', extent=self.extent_plot)
         plt.colorbar(label='B_long [G]')
         plt.title('Longitudinal Magnetic Field')
         plt.subplot(1, 3, 2)
-        plt.imshow(B_tran, origin='lower', cmap='gray', aspect='auto')
+        plt.imshow(B_tran, origin='lower', cmap='gray', aspect='equal', extent=self.extent_plot)
         plt.colorbar(label='B_trans [G]')
         plt.title('Transversal Magnetic Field')
         plt.subplot(1, 3, 3)
-        plt.imshow(self.inv_models[0, :, :, 3], origin='lower', cmap='seismic', aspect='auto')
+        plt.imshow(self.inv_models[0, :, :, 3], origin='lower', cmap='seismic', aspect='equal', extent=self.extent_plot)
         plt.colorbar(label='LOS Velocity [km/s]')
         plt.title('LOS Velocity')
         plt.tight_layout()
@@ -522,6 +534,9 @@ if __name__ == "__main__":
 
     hdul_obs = fits.open(file_name_obs) 
     stk_data_obs = hdul_obs[0].data
+    stk_header_obs = hdul_obs[0].header
+    print(stk_header_obs["CDELT2"])
+    scan_scale=stk_header_obs["CDELT2"]
     stk_data_wl_obs = hdul_obs[1].data
 
     if file_name_inv != 'None':
@@ -535,7 +550,7 @@ if __name__ == "__main__":
 
     else:
         checking_obs=spect_check(stk_data_obs)
-        checking_obs.set_parameters(stk_data_wl_obs*10)
+        checking_obs.set_parameters(stk_data_wl_obs*10, pix_size=(0.3, scan_scale))
         checking_obs.inspect()
 
 
