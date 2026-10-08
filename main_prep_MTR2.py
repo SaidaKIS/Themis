@@ -3,7 +3,6 @@ import numpy as np
 from astropy.io import fits
 import astropy.units as u #Operations between units and constants
 import matplotlib.pyplot as plt
-plt.rcParams.update({'font.size': 22})
 import sys
 from datetime import datetime
 
@@ -506,7 +505,12 @@ def process_science_data(science_filepath, tform, s_factor, poly_coeffs_b1=None,
             plt.tight_layout()
             plt.show()
 
-            input_local = input("  Validate the calculation? [yes/no]  ")
+            input_local = input("Validate the calculation? [yes/no]")
+            proceed = input().strip().lower()
+            if proceed_stokes != "yes":
+                print("Process aborted by user. Exiting.")
+                exit(0) 
+
             plt.close(fig) 
 
     hdul.close()
@@ -608,7 +612,13 @@ def process_science_data_nopol(science_filepath, tform_matrix=None, s_factor=Non
 
 
     frames, height, width = raw_data_mapped.shape
-    scans = header["NAXIS3"]
+
+    seq_stk = header["SEQ_STOK"].split(" ")
+    nsew_stk = len(seq_stk)
+    if nsew_stk == 6:    
+        scans = header["NAXIS3"]//nsew_stk
+    else:
+        scans = header["NAXIS3"]
     print(scans)
     
     x_start, x_end = config_roi.get('crg1', [0, width]) if config_roi else [0, width]
@@ -648,8 +658,10 @@ def process_science_data_nopol(science_filepath, tform_matrix=None, s_factor=Non
         
     for s in tqdm(range(scans), desc="Processing Scans", unit="scan"):
         # Temporary small storage just for the current scan's modulation frames
-           
-        frame_idx = s
+        if nsew_stk == 6:
+            frame_idx = (s*nsew_stk)+1
+        else:
+            frame_idx = s
     
         b1_frame = raw_data_mapped[frame_idx, :, :].astype(np.float32) + bzero
     
