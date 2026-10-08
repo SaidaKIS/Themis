@@ -396,8 +396,8 @@ def main():
     central_wavelength = float(input("Enter the central wavelength of the observed data range to be calibrated (in nm): "))
     num_telluric_lines = int(input("Enter the number of telluric lines in the observed data range: "))
 
-    #with the central wavelenght, we define the range of the observed data to be calibrated around 0.5 nm of the central wavelength
-    observed_data_range = (central_wavelength - 0.25, central_wavelength + 0.25)
+    #with the central wavelenght, we define the range of the observed data to be calibrated around 0.6 nm of the central wavelength
+    observed_data_range = (central_wavelength - 0.35, central_wavelength + 0.35)
     solar_region_mask = (solar_atlas[0, :] >= observed_data_range[0]) & (solar_atlas[0, :] <= observed_data_range[1])
     solar_region_wavelengths = solar_atlas[0, solar_region_mask]
     solar_region_intensities = solar_atlas[1, solar_region_mask]
@@ -535,7 +535,10 @@ def main():
 
     #Create a new fits file with the wavelength-calibrated observed data and save it with out replacing the original observed data file.
     #Include as a extra hdu the new wavelength axis and the original header of the observed data file.
-    new_fits_file = observed_stokes_file.replace(".fits", "_norm_wavelength_calibrated.fits")
+    if ".fts" in observed_stokes_file:
+        new_fits_file = observed_stokes_file.replace(".fts", "_norm_wavelength_calibrated.fits")
+    else:
+        new_fits_file = observed_stokes_file.replace(".fts", "_norm_wavelength_calibrated.fits")
     hdu = fits.PrimaryHDU(data=wavelength_calibrated_cube, header=stokes_cube[0].header)
     hdul = fits.HDUList([hdu])
     wavelength_hdu = fits.ImageHDU(data=wavelength_calibrated, header=stokes_cube[0].header)
