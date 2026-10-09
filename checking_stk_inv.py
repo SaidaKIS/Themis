@@ -7,9 +7,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 import sys
 from copy import copy
 import matplotlib.gridspec as gridspec
-
 from matplotlib.widgets import Slider, Cursor
-import matplotlib.gridspec as gridspec
 
 c=2.99e8 #speed of light in m/s
 
@@ -525,7 +523,6 @@ class spect_inv_check():
         plt.title('LOS Velocity')
         plt.tight_layout()
         plt.show()
-
 
 
 if __name__ == "__main__":
