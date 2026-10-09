@@ -36,7 +36,7 @@ class spect_check():
     Parameters:
     1. cube_obs: Spectropolarimetric observations (Stokes vector, H, W, Wavelenght)
     """
-    def __init__(self, cube_obs, contour_image=None, levels=None):
+    def __init__(self, cube_obs, filename, contour_image=None, levels=None):
 
         self.cube_obs = np.array(cube_obs)
         self.stokes_fov_avg = np.nanmean(self.cube_obs, axis=(1,2))
@@ -44,6 +44,7 @@ class spect_check():
         self.bg_map = self.cube_obs[0,:,:,0]
         self.contour_image = contour_image
         self.levels = levels
+        self.filename = filename
     
     def set_parameters(self, scan_pos, lam=None, cont_value=1, pix_size=(1,1)):
         self.scan_pos = scan_pos
@@ -119,6 +120,9 @@ class spect_check():
             self.ax3.set_xlim([self.wl[0],self.wl[-1]])
             self.ax4.set_xlim([self.wl[0],self.wl[-1]])
 
+            filename_str = self.filename.split("/")[-1]
+            self.fig.suptitle(f"File: {filename_str}")
+
             self.cursor1 = Cursor(self.ax0, horizOn = True, vertOn = True, color = 'red',linewidth = '0.5')
             self.cid1= self.fig.canvas.mpl_connect("motion_notify_event", self.pointing1)
 
@@ -162,6 +166,9 @@ class spect_check():
             self.ax1.set_ylim([0.0,1.5])
                         
             self.ax1.set_xlim([self.wl[0],self.wl[-1]])
+
+            filename_str = self.filename.split("/")[-1]
+            self.fig.suptitle(f"File: {filename_str}")
                         
             self.cursor1 = Cursor(self.ax0, horizOn = True, vertOn = True, color = 'red',linewidth = '0.5')
             self.cid1= self.fig.canvas.mpl_connect("motion_notify_event", self.pointing1)
@@ -244,7 +251,7 @@ class spect_inv_check():
         2. cube_inv: Profile fits from inversion results (Stokes vector, H, W, Wavelenght)
     """
 
-    def __init__(self, cube_obs, cube_inv=False, inv_models=False, contour_image=None, levels=None):
+    def __init__(self, cube_obs, filename, cube_inv=False, inv_models=False, contour_image=None, levels=None):
 
         self.cube_obs = np.array(cube_obs)
         self.stokes_fov_avg = np.nanmean(self.cube_obs, axis=(1,2))
@@ -252,6 +259,7 @@ class spect_inv_check():
         self.bg_map = self.cube_obs[0,:,:,0]
         self.contour_image = contour_image
         self.levels = levels
+        self.filename = filename
 
         if isinstance(cube_inv, bool) == False:
             print(cube_inv.shape)
@@ -352,6 +360,10 @@ class spect_inv_check():
         self.ax2.set_xlim([self.wl[0],self.wl[-1]])
         self.ax3.set_xlim([self.wl[0],self.wl[-1]])
         self.ax4.set_xlim([self.wl[0],self.wl[-1]])
+
+        filename_str = self.filename.split("/")[-1]
+        self.fig.suptitle(f"File: {filename_str}")
+
         self.cursor1 = Cursor(self.ax0, horizOn = True, vertOn = True, color = 'red',linewidth = '0.5')
         self.cid1= self.fig.canvas.mpl_connect("motion_notify_event", self.pointing1)
         self.cursor2 = Cursor(self.ax1, horizOn = False, vertOn = True, color = 'blue',linewidth = '0.5')
@@ -1151,7 +1163,7 @@ if __name__ == "__main__":
             #checking_obs_inv.chi_calculation_specific(line=6302.5, width=0.4)
             checking_obs_inv.check_infered_model()
         else:
-            checking_obs_inv=spect_inv_check_files(list_obs_files, list_inv_files)
+            checking_obs_inv=spect_inv_check_files(list_obs_files, list_inv_files, list_obs_files[0])
             checking_obs_inv.set_parameters()
             checking_obs_inv.inspect(chi=False)
             #checking_obs_inv.chi_calculation_specific(line=6302.5, width=0.4)
@@ -1162,7 +1174,7 @@ if __name__ == "__main__":
             hdul_obs = fits.open(list_obs_files[0]) 
             stk_data_obs = hdul_obs[0].data
             stk_data_wl_obs = hdul_obs[1].data
-            checking_obs=spect_check(stk_data_obs)
+            checking_obs=spect_check(stk_data_obs, list_obs_files[0])
             checking_obs.set_parameters(stk_data_wl_obs*10)
             checking_obs.inspect()
         else:
