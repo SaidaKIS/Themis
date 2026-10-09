@@ -486,22 +486,29 @@ def main():
     scans, stokes, y, wavelenght = stokes_cube[0].data.shape
     print(f"Original Stokes cube shape: {stokes_cube[0].data.shape}")
 
-    
-    wavelenght_binned = wavelenght // 2  # update the wavelength dimension after binning
-    wavelength_calibrated_cube = np.zeros_like(np.zeros([stokes, y, scans, wavelenght_binned]), dtype=np.float32)
     if wavelenght % 2 != 0:
         print("Odd number of wavelength pixels, reducing by 1.")
         wavelenght -= 1
         wavelength_calibrated = wavelength_calibrated[:-1]
 
+    binned_cond = input("Do you want binning of the spectral sampling? (yes/no)").strip().lower()
+    
+    if binned_cond == 'yes':
+        wavelenght_binned = wavelenght // 2  # update the wavelength dimension after binning
+        wavelength_calibrated = wavelength_calibrated.reshape(wavelenght_binned, 2).mean(axis=1) 
+    elif binned_cond == 'no':
+        wavelenght_binned = wavelenght
+
+    wavelength_calibrated_cube = np.zeros_like(np.zeros([stokes, y, scans, wavelenght_binned]), dtype=np.float32)
     for i in range(scans):
         for j in range(stokes):
             #normalize the data to the maximum value of the rest spectrum
             stokes_cube[0].data[i, j, :, :] /= rest_spectrum_max
             #apply the binning to the wavelength axis with mean as operation
-            wavelength_calibrated_cube[j, :, i, :] = stokes_cube[0].data[i, j, :, :wavelenght].reshape(y, wavelenght_binned, 2).mean(axis=2) 
-            
-    wavelength_calibrated = wavelength_calibrated.reshape(wavelenght_binned, 2).mean(axis=1)    
+            if binned_cond == 'yes':
+                wavelength_calibrated_cube[j, :, i, :] = stokes_cube[0].data[i, j, :, :wavelenght].reshape(y, wavelenght_binned, 2).mean(axis=2) 
+            elif binned_cond == 'no':
+                wavelength_calibrated_cube[j, :, i, :] = stokes_cube[0].data[i, j, :, :wavelenght]
 
     #Check the new spectral resolution of the wavelength-calibrated observed data.
     spectral_resolution_observed_binned = 10000 * ((wavelength_calibrated[1] - wavelength_calibrated[0]))
@@ -512,27 +519,27 @@ def main():
     #Invert the wavelength axis to ensure increasing order
     wavelength_calibrated_cube = wavelength_calibrated_cube[:, :, :, ::-1]
 
-    #Ask the user to select the wavelength for a plot of the wavelength-calibrated cube to check the results.
-    wavelength_position = float(input("Enter the wavelength (in nm) to plot the wavelength-calibrated cube: "))
-    wavelength_index = np.argmin(np.abs(wavelength_calibrated - wavelength_position))
-    print(f"Wavelength index for {wavelength_position} nm:", wavelength_index)
-    plt.figure(figsize=(10, 5))
-    plt.imshow(wavelength_calibrated_cube[0, :, :, wavelength_index], aspect='auto', cmap='gray')
-    plt.title(f"Wavelength-Calibrated Cube - First Stokes Parameter at {wavelength_position} nm")
-    plt.xlabel("X (scans)")
-    plt.ylabel("Y (spatial dimension)")
-    plt.colorbar(label="Intensity")
-    plt.show()
-
-    if wavelength_calibrated_cube.shape[0] > 1:
-        plt.figure(figsize=(10, 5))
-        plt.imshow(wavelength_calibrated_cube[3, :, :, wavelength_index], aspect='auto', cmap='gray')
-        plt.title(f"Wavelength-Calibrated Cube -  Stokes V Parameter at {wavelength_position} nm")
-        plt.xlabel("X (scans)")
-        plt.ylabel("Y (spatial dimension)")
-        plt.colorbar(label="Intensity")
-        plt.show()
-
+    ##Ask the user to select the wavelength for a plot of the wavelength-calibrated cube to check the results.
+    #wavelength_position = float(input("Enter the wavelength (in nm) to plot the wavelength-calibrated cube: "))
+    #wavelength_index = np.argmin(np.abs(wavelength_calibrated - wavelength_position))
+    #print(f"Wavelength index for {wavelength_position} nm:", wavelength_index)
+    #plt.figure(figsize=(10, 5))
+    #plt.imshow(wavelength_calibrated_cube[0, :, :, wavelength_index], aspect='auto', cmap='gray')
+    #plt.title(f"Wavelength-Calibrated Cube - First Stokes Parameter at {wavelength_position} nm")
+    #plt.xlabel("X (scans)")
+    #plt.ylabel("Y (spatial dimension)")
+    #plt.colorbar(label="Intensity")
+    #plt.show()
+#
+    #if wavelength_calibrated_cube.shape[0] > 1:
+    #    plt.figure(figsize=(10, 5))
+    #    plt.imshow(wavelength_calibrated_cube[3, :, :, wavelength_index], aspect='auto', cmap='gray')
+    #    plt.title(f"Wavelength-Calibrated Cube -  Stokes V Parameter at {wavelength_position} nm")
+    #    plt.xlabel("X (scans)")
+    #    plt.ylabel("Y (spatial dimension)")
+    #    plt.colorbar(label="Intensity")
+    #    plt.show()
+#
     #Create a new fits file with the wavelength-calibrated observed data and save it with out replacing the original observed data file.
     #Include as a extra hdu the new wavelength axis and the original header of the observed data file.
     if ".fts" in observed_stokes_file:
