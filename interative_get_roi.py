@@ -1,5 +1,3 @@
-from configparser import NoOptionError
-
 import numpy as np
 import matplotlib
 # Force a GUI backend so interactive windows pop up cleanly
