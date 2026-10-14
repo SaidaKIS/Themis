@@ -36,7 +36,7 @@ class spect_check():
     Parameters:
     1. cube_obs: Spectropolarimetric observations (Stokes vector, H, W, Wavelenght)
     """
-    def __init__(self, cube_obs, filename, contour_image=None, levels=None):
+    def __init__(self, cube_obs, header_pos, filename, contour_image=None, levels=None):
 
         self.cube_obs = np.array(cube_obs)
         self.stokes_fov_avg = np.nanmean(self.cube_obs, axis=(1,2))
@@ -45,15 +45,17 @@ class spect_check():
         self.contour_image = contour_image
         self.levels = levels
         self.filename = filename
+
+        self.slit_scale=header_pos["CDELT2"]
+        self.scan_scale=header_pos["STEP_X"]
     
-    def set_parameters(self, scan_pos, lam=None, cont_value=1, pix_size=(1,1)):
+    def set_parameters(self, scan_pos, lam=None, cont_value=1):
         self.scan_pos = scan_pos
         self.lam = lam
-        self.pix_size = pix_size
         self.cont = cont_value
 
-        scale_x = pix_size[0]  
-        scale_y = pix_size[1]
+        scale_x = self.scan_scale  
+        scale_y = self.slit_scale
         xmin, ymin = 0.0, 0.0  # Starting coordinates
 
         self.ny, self.nx = self.bg_map.shape
@@ -251,7 +253,7 @@ class spect_inv_check():
         2. cube_inv: Profile fits from inversion results (Stokes vector, H, W, Wavelenght)
     """
 
-    def __init__(self, cube_obs, filename, cube_inv=False, inv_models=False, contour_image=None, levels=None):
+    def __init__(self, cube_obs, header_pos, filename, cube_inv=False, inv_models=False, contour_image=None, levels=None):
 
         self.cube_obs = np.array(cube_obs)
         self.stokes_fov_avg = np.nanmean(self.cube_obs, axis=(1,2))
@@ -260,6 +262,8 @@ class spect_inv_check():
         self.contour_image = contour_image
         self.levels = levels
         self.filename = filename
+        self.slit_scale=header_pos["CDELT2"]
+        self.scan_scale=header_pos["STEP_X"]
 
         if isinstance(cube_inv, bool) == False:
             print(cube_inv.shape)
@@ -277,8 +281,8 @@ class spect_inv_check():
         self.pix_size = pix_size
         self.cont = cont_value
 
-        scale_x = pix_size[0]  
-        scale_y = pix_size[1]
+        scale_x = self.scan_scale  
+        scale_y = self.slit_scale
         xmin, ymin = 0.0, 0.0  # Starting coordinates
 
         self.ny, self.nx = self.bg_map.shape
@@ -518,21 +522,21 @@ class spect_inv_check():
         plt.ylabel('Y')
         plt.show()
 
-    def check_infered_model(self):
+    def check_infered_model(self, Bl_lims=[-800,800], Bt_lims=[800,0], vlos_lims=[-6,6]):
         #Plot Longitudinal Magnetic Field, Transversal Magnetic Field and LOS Velocity from the inversion results
         plt.figure(figsize=(15, 5))
         plt.subplot(1, 3, 1)
         B_long = self.inv_models[0, :, :, 0]*np.cos(self.inv_models[0, :, :, 1])
         B_tran = self.inv_models[0, :, :, 0]*np.sin(self.inv_models[0, :, :, 1])
-        plt.imshow(-B_long, origin='lower', cmap='RdBu_r', vmin=-800, vmax=800, aspect='equal', extent=self.extent_plot)
+        plt.imshow(-B_long, origin='lower', cmap='RdBu_r', vmin=Bl_lims[0], vmax=Bl_lims[1], aspect='equal', extent=self.extent_plot)
         plt.colorbar(label='B_long [G]')
         plt.title('Longitudinal Magnetic Field')
         plt.subplot(1, 3, 2)
-        plt.imshow(B_tran, origin='lower', cmap='gray', aspect='equal', extent=self.extent_plot)
+        plt.imshow(B_tran, origin='lower', cmap='gray', vmin=Bt_lims[0], vmax=Bt_lims[1], aspect='equal', extent=self.extent_plot)
         plt.colorbar(label='B_trans [G]')
         plt.title('Transversal Magnetic Field')
         plt.subplot(1, 3, 3)
-        plt.imshow(self.inv_models[0, :, :, 3], origin='lower', cmap='seismic', vmin=-6, vmax=6, aspect='equal', extent=self.extent_plot)
+        plt.imshow(self.inv_models[0, :, :, 3], origin='lower', cmap='seismic', vmin=vlos_lims[0], vmax=vlos_lims[1], aspect='equal', extent=self.extent_plot)
         plt.colorbar(label='LOS Velocity [km/s]')
         plt.title('LOS Velocity')
         plt.tight_layout()
@@ -1155,10 +1159,12 @@ if __name__ == "__main__":
             hdul_obs = fits.open(list_obs_files[0]) 
             stk_data_obs = hdul_obs[0].data
             stk_data_wl_obs = hdul_obs[1].data
+            stk_header = hdul_obs[0].header
             hdul_inv = fits.open(file_name_inv)
             stk_data_inv = hdul_inv[1].data
-            checking_obs_inv=spect_inv_check(stk_data_obs, stk_data_inv, inv_models=hdul_inv[0].data)
-            checking_obs_inv.set_parameters(stk_data_wl_obs*10)
+            stk_data_wl_inv = hdul_inv[2].data
+            checking_obs_inv=spect_inv_check(stk_data_obs, stk_header, file_name_obs, stk_data_inv, inv_models=hdul_inv[0].data)
+            checking_obs_inv.set_parameters(stk_data_wl_obs*10, stk_data_wl_inv)
             checking_obs_inv.inspect(chi=False)
             #checking_obs_inv.chi_calculation_specific(line=6302.5, width=0.4)
             checking_obs_inv.check_infered_model()
@@ -1174,7 +1180,8 @@ if __name__ == "__main__":
             hdul_obs = fits.open(list_obs_files[0]) 
             stk_data_obs = hdul_obs[0].data
             stk_data_wl_obs = hdul_obs[1].data
-            checking_obs=spect_check(stk_data_obs, list_obs_files[0])
+            stk_header = hdul_obs[0].header
+            checking_obs=spect_check(stk_data_obs, stk_header, list_obs_files[0])
             checking_obs.set_parameters(stk_data_wl_obs*10)
             checking_obs.inspect()
         else:
