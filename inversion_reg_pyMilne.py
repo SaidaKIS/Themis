@@ -12,6 +12,8 @@ import astropy.units as u
 from astropy.time import Time
 from sunpy.coordinates.utils import get_heliocentric_angle
 
+#NOTES 5247.05 line geff~2.0 and 5250.21 line geff~3.0
+
 def mu_angle(time, carr_longitude, carr_latitude):
 
     obstime = Time(time, scale="utc")
@@ -36,8 +38,8 @@ def mu_angle(time, carr_longitude, carr_latitude):
 def process_fits_cube(fits_path, out_path, wavelength, lines, 
                       N_WORKERS=1, mu=1.0, initial_guess=None, psf=None):
 
-    invertible_lines = {6301: 6301.4995, 6302: 6302.4931}
-    spectral_width = {6301: 0.6, 6302: 0.4}
+    invertible_lines = {6301: 6301.4995, 6302: 6302.4931, 5247: 5247.0501, 5250: 5250.2086}
+    spectral_width = {6301: 0.6, 6302: 0.4, }
     
     with fits.open(fits_path, memmap=True) as hdul:
         data_cube = hdul[0].data  # Shape: (4, Ny, Nx, N_wvl)
