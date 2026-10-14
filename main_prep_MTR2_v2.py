@@ -693,7 +693,7 @@ if __name__ == "__main__":
     print("1. Compute alignment and scale factor using the flat-field data.")
     print("2. Evaluate the calibration visually (optional).")
     print("3. Extract the final Stokes matrix from the science data.")
-    print("Please follow the prompts to provide the necessary file paths.")
+    print("Please follow the prompts to provide the necessary file paths and validation if necesary.")
 
     checking_calibration = 0
 
