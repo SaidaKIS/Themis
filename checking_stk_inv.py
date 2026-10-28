@@ -555,6 +555,16 @@ class spect_check_files():
         self.contour_image = contour_image
         self.levels = levels
 
+        self.cont = 1.0
+        self.lam = None
+        self.cursors = []
+        self.wavelength_vlines = []
+
+        self.wavelength_shifts = {}  # Store manual wavelength shifts per file index
+        self.wavelength_locked = False  # Lock state for wavelength inspection
+        self.wl_ind = 0
+        self.ax_fix = 0
+
     def load_current_cube(self):
         with fits.open(self.files[self.index]) as hdul:
             self.cube_obs = np.array(hdul[0].data)
@@ -567,10 +577,8 @@ class spect_check_files():
         self.slit_scale=self.header_pos["CDELT2"]
         self.scan_scale=self.header_pos["STEP_X"] 
     
-    def set_parameters(self, lam=None, cont_value=1):
+    def set_parameters(self):
         self.load_current_cube()
-        self.lam = lam
-        self.cont = cont_value
 
         scale_x = self.scan_scale  
         scale_y = self.slit_scale
@@ -582,7 +590,7 @@ class spect_check_files():
 
     def inspect(self, cmap_context='gray'):
         self.cmap_bg = cmap_context
-
+        plt.close('all')
         self.fig = plt.figure(figsize=(15, 10))
         plt.subplots_adjust(bottom=0.15)
         
@@ -627,10 +635,15 @@ class spect_check_files():
             self.ax2.legend()
             self.ax3.legend()
             self.ax4.legend()
-            self.ax1.grid()
-            self.ax2.grid()
-            self.ax3.grid()
-            self.ax4.grid()
+            self.ax1.grid(True)
+            self.ax2.grid(True)
+            self.ax3.grid(True)
+            self.ax4.grid(True)
+
+            for ax in [self.ax1,self.ax2,self.ax3,self.ax4]:
+                # Add vertical wavelength tracking line
+                vline = ax.axvline(self.wl[0], color='blue', linestyle=':', alpha=0.7, label='Current wl')
+                self.wavelength_vlines.append(vline)
 
             self.ax1.set_ylim([0.0,1.1])
             self.ax2.set_ylim([-0.05,0.05])
@@ -656,9 +669,10 @@ class spect_check_files():
 
             self.cursor5 = Cursor(self.ax4, horizOn = False, vertOn = True, color = 'blue',linewidth = '0.5')
             self.cid5= self.fig.canvas.mpl_connect("motion_notify_event", self.pointing5)
+
+            self.cid6 = self.fig.canvas.mpl_connect("button_press_event", self.on_spectral_click)
         
         elif self.cube_shape[0] == 1:
-            self.fig = plt.figure(figsize=(15,10))
             spec = gridspec.GridSpec(ncols=2, nrows=1, figure=self.fig)
             self.ax0 = self.fig.add_subplot(spec[0, 0])
             self.ax1 = self.fig.add_subplot(spec[0, 1])
@@ -675,6 +689,9 @@ class spect_check_files():
 
             self.line_obs1, = self.ax1.plot([], [], color='black', label='Observed')
 
+            vline = self.ax1.axvline(self.wl[0], color='blue', linestyle=':', alpha=0.7, label='Current wl')
+            self.wavelength_vlines.append(vline)
+
             self.ax1.set_ylabel(r'$I/I_c$')
             self.ax1.set_xlabel(r'Wavelength [Å]')
 
@@ -689,6 +706,8 @@ class spect_check_files():
             
             self.cursor2 = Cursor(self.ax1, horizOn = False, vertOn = True, color = 'blue',linewidth = '0.5')
             self.cid2= self.fig.canvas.mpl_connect("motion_notify_event", self.pointing2)
+
+            self.cid6 = self.fig.canvas.mpl_connect("button_press_event", self.on_spectral_click)
 
         # Add Previous and Next buttons
         ax_prev = plt.axes([0.15, 0.03, 0.10, 0.05])
@@ -705,27 +724,70 @@ class spect_check_files():
         filename = self.files[self.index].split("/")[-1]
         self.fig.suptitle(f"File [{self.index+1}/{len(self.files)}]: {filename}")
 
+    def update_wavelength_indicator(self, wl_val):
+        """Helper to update vertical lines across all spectral axes."""
+        for vline in self.wavelength_vlines:
+            vline.set_xdata([wl_val, wl_val])
+
+    def on_spectral_click(self, event):
+        """Right-click (button 3) unlocks wavelength; Left-click (button 1) locks wavelength inspection."""
+        if self.cube_shape[0] == 4:
+            self.spectral_axes = [self.ax1,self.ax2,self.ax3,self.ax4]    
+        if self.cube_shape[0] == 1:
+            self.spectral_axes = [self.ax1]
+
+        if event.inaxes in self.spectral_axes and event.xdata is not None:
+            if event.button == 1:  # Left-click
+                self.wavelength_locked = True
+                wl = event.xdata
+                wl_ind = np.argmin(np.abs(self.wl - wl))
+                
+                stk_idx = self.spectral_axes.index(event.inaxes)
+                img_data = self.cube_obs[stk_idx, :, :, wl_ind]    
+                self.p1.set_data(img_data)
+                vmin, vmax = np.nanmin(img_data), np.nanmax(img_data)
+                self.p1.set_clim(vmin=vmin, vmax=vmax)
+                
+                self.update_wavelength_indicator(self.wl[wl_ind])
+                self.wl_ind = wl_ind
+                self.ax_fix = stk_idx
+                self.fig.canvas.draw_idle()
+                print(f">>> Wavelength LOCKED at {self.wl[wl_ind]:.3f} Å")
+                    
+            elif event.button == 3:  # Right-click
+                self.wavelength_locked = False
+                self.wl_ind = 0
+                self.ax_fix = 0
+                print(">>> Wavelength UNLOCKED (free to move).")
+
     def update_display(self):
-      self.load_current_cube()
-      self.ny, self.nx = self.bg_map.shape
+        self.load_current_cube()
+        self.ny, self.nx = self.bg_map.shape
+        
+        if self.wl_ind != 0:
+            img_data = self.cube_obs[self.ax_fix, :, :, self.wl_ind]    
+            self.p1.set_data(img_data)
+            vmin, vmax = np.nanmin(img_data), np.nanmax(img_data)
+            self.p1.set_clim(vmin=vmin, vmax=vmax)
+            
+        else:
+            self.p1.set_data(self.bg_map)
+            vmin, vmax = np.nanmin(self.bg_map), np.nanmax(self.bg_map)
+            self.p1.set_clim(vmin=vmin, vmax=vmax)
 
-      self.p1.set_data(self.bg_map)
-      vmin, vmax = np.nanmin(self.bg_map), np.nanmax(self.bg_map)
-      self.p1.set_clim(vmin=vmin, vmax=vmax)
+        if self.cube_shape[0] == 4:
+            self.line_mean1.set_data(self.wl, self.stokes_fov_avg[0] / self.cont)
+            self.line_mean2.set_data(self.wl, self.stokes_fov_avg[1] / self.cont)
+            self.line_mean3.set_data(self.wl, self.stokes_fov_avg[2] / self.cont)
+            self.line_mean4.set_data(self.wl, self.stokes_fov_avg[3] / self.cont)
+            for line in [self.line_obs1,self.line_obs2,self.line_obs3,self.line_obs4]:
+                line.set_data([], [])
+        elif self.cube_shape[0] == 1:
+            self.line_mean1.set_data(self.wl, self.stokes_fov_avg[0] / self.cont)
+            self.line_obs1.set_data([], [])
 
-      if self.cube_shape[0] == 4:
-        self.line_mean1.set_data(self.wl, self.stokes_fov_avg[0] / self.cont)
-        self.line_mean2.set_data(self.wl, self.stokes_fov_avg[1] / self.cont)
-        self.line_mean3.set_data(self.wl, self.stokes_fov_avg[2] / self.cont)
-        self.line_mean4.set_data(self.wl, self.stokes_fov_avg[3] / self.cont)
-        for line in [self.line_obs1,self.line_obs2,self.line_obs3,self.line_obs4]:
-            line.set_data([], [])
-      elif self.cube_shape[0] == 1:
-        self.line_mean1.set_data(self.wl, self.stokes_fov_avg[0] / self.cont)
-        self.line_obs1.set_data([], [])
-
-      self.update_title()
-      self.fig.canvas.draw_idle()
+        self.update_title()
+        self.fig.canvas.draw_idle()
 
     def next_file(self, event):
         self.index = (self.index + 1) % len(self.files)
@@ -757,6 +819,9 @@ class spect_check_files():
         self.fig.canvas.draw_idle()
     
     def pointing2(self, event):
+        if self.wavelength_locked:
+            return
+        
         if event.inaxes == self.ax1 and event.xdata is not None:
             wl = event.xdata
             wl_ind = np.argmin(np.abs(self.wl - wl))
@@ -765,9 +830,14 @@ class spect_check_files():
             vmin, vmax = np.nanmin(img_data), np.nanmax(img_data)
             self.p1.set_clim(vmin=vmin, vmax=vmax)
 
+            self.update_wavelength_indicator(self.wl[wl_ind])
+
         self.fig.canvas.draw_idle()
     
     def pointing3(self, event):
+        if self.wavelength_locked:
+            return
+    
         if event.inaxes == self.ax2 and event.xdata is not None:
             wl = event.xdata
             wl_ind = np.argmin(np.abs(self.wl - wl))
@@ -775,10 +845,14 @@ class spect_check_files():
             self.p1.set_data(img_data)
             vmin, vmax = np.nanmin(img_data), np.nanmax(img_data)
             self.p1.set_clim(vmin=vmin, vmax=vmax)
+            self.update_wavelength_indicator(self.wl[wl_ind])
 
         self.fig.canvas.draw_idle()
     
     def pointing4(self, event):
+        if self.wavelength_locked:
+            return
+
         if event.inaxes == self.ax3 and event.xdata is not None:
             wl = event.xdata
             wl_ind = np.argmin(np.abs(self.wl - wl))
@@ -786,10 +860,14 @@ class spect_check_files():
             self.p1.set_data(img_data)
             vmin, vmax = np.nanmin(img_data), np.nanmax(img_data)
             self.p1.set_clim(vmin=vmin, vmax=vmax)
+            self.update_wavelength_indicator(self.wl[wl_ind])
 
         self.fig.canvas.draw_idle()
     
     def pointing5(self, event):
+        if self.wavelength_locked:
+            return
+
         if event.inaxes == self.ax4 and event.xdata is not None:
             wl = event.xdata
             wl_ind = np.argmin(np.abs(self.wl - wl))
@@ -797,6 +875,7 @@ class spect_check_files():
             self.p1.set_data(img_data)
             vmin, vmax = np.nanmin(img_data), np.nanmax(img_data)
             self.p1.set_clim(vmin=vmin, vmax=vmax)
+            self.update_wavelength_indicator(self.wl[wl_ind])
 
         self.fig.canvas.draw_idle()
 
@@ -1188,8 +1267,3 @@ if __name__ == "__main__":
             checking_obs=spect_check_files(list_obs_files)
             checking_obs.set_parameters()
             checking_obs.inspect()
-
-
-
-
-
