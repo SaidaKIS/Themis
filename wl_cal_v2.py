@@ -191,6 +191,14 @@ class wl_range_selector_atlas:
             self.line2_max.set_xdata([xmax, xmax])
             self.fig.canvas.draw_idle()
 
+    def on_key(self, event):
+        if event.key == 'escape':
+            self.xmin1 = self.xmax1 = self.ymin1 = self.ymax1 = None
+            self.xmin2 = self.xmax2 = self.ymin2 = self.ymax2 = None
+            self.ax.set_title(self.title)
+            self.fig.canvas.draw_idle()
+            print("\n>> [RESET] Selection erased. Try again ...")
+
 class wl_range_selector_observed:
     def __init__(self, obs, type='Observed'):
         self.fig, self.ax = plt.subplots(figsize=(8, 4))
@@ -255,6 +263,14 @@ class wl_range_selector_observed:
             self.line2_min.set_xdata([xmin, xmin])
             self.line2_max.set_xdata([xmax, xmax])
             self.fig.canvas.draw_idle()
+
+    def on_key(self, event):
+        if event.key == 'escape':
+            self.xmin1 = self.xmax1 = self.ymin1 = self.ymax1 = None
+            self.xmin2 = self.xmax2 = self.ymin2 = self.ymax2 = None
+            self.ax.set_title(self.title)
+            self.fig.canvas.draw_idle()
+            print("\n>> [RESET] Selection erased. Try again ...")
 
 def wavelength_range_selection_atlas(solar_region_wavelengths, solar_region_intensities, 
                                telluric_region_wavelengths, telluric_region_intensities, 
@@ -338,6 +354,85 @@ def wavelength_range_selection_observed(observed):
     
     return central_wavelength_observed
 
+def wavelength_range_selection_simultaneous(solar_region_wavelengths, solar_region_intensities, 
+                                            telluric_region_wavelengths, telluric_region_intensities, 
+                                            num_telluric_lines, observed):
+
+    # 1. Enable interactive mode FIRST (prevents subplots from blocking on creation)
+    plt.ion()
+
+    # Determine atlas type string
+    if num_telluric_lines == 0:
+        atlas_type = 'Solar'
+        calc_wavelengths1 = calc_wavelengths2 = solar_region_wavelengths
+        calc_intensities1 = calc_intensities2 = solar_region_intensities
+    elif num_telluric_lines == 1:
+        atlas_type = 'Telluric/Solar'
+        calc_wavelengths1 = telluric_region_wavelengths
+        calc_wavelengths2 = solar_region_wavelengths
+        calc_intensities1 = telluric_region_intensities
+        calc_intensities2 = solar_region_intensities
+    else:
+        atlas_type = 'Telluric'
+        calc_wavelengths1 = calc_wavelengths2 = telluric_region_wavelengths
+        calc_intensities1 = calc_intensities2 = telluric_region_intensities
+
+    print("Opening both selection windows simultaneously...")
+    
+    # 2. Instantiate both classes (this pops up both figure windows at the same time)
+    selector_atlas = wl_range_selector_atlas(
+        solar_region_wavelengths, solar_region_intensities, 
+        telluric_region_wavelengths, telluric_region_intensities, 
+        type=atlas_type
+    )
+    
+    selector_observed = wl_range_selector_observed(observed, type='Observed')
+
+    # Render both windows without blocking script execution
+    plt.show(block=False)
+
+    print("Please make your selections in both figures. Close the windows when finished.")
+
+    # 3. Wait loop: Keeps the event loop alive and pauses script execution 
+    # until both windows are closed by the user.
+    while plt.get_fignums():
+        plt.pause(0.1)
+
+    # Turn off interactive mode once done
+    plt.ioff()
+
+    # 4. Verify that selections were actually made
+    if selector_atlas.xmax1 is None or selector_atlas.xmax2 is None:
+        raise ValueError("Atlas wavelength selection was incomplete or cancelled.")
+    if selector_observed.xmax1 is None or selector_observed.xmax2 is None:
+        raise ValueError("Observed wavelength selection was incomplete or cancelled.")
+
+    # 5. Process Atlas Results
+    mask_line1 = (calc_wavelengths1 >= selector_atlas.xmin1) & (calc_wavelengths1 <= selector_atlas.xmax1)
+    lc_line1 = lc_core(calc_intensities1, np.where(mask_line1)[0][0], np.where(mask_line1)[0][-1]+1, 10)
+    central_wavelength_line1 = calc_wavelengths1[int(lc_line1[0])]
+    
+    mask_line2 = (calc_wavelengths2 >= selector_atlas.xmin2) & (calc_wavelengths2 <= selector_atlas.xmax2)
+    lc_line2 = lc_core(calc_intensities2, np.where(mask_line2)[0][0], np.where(mask_line2)[0][-1]+1, 10)
+    central_wavelength_line2 = calc_wavelengths2[int(lc_line2[0])]
+    
+    central_wavelengths_atlas = (central_wavelength_line1, central_wavelength_line2)
+
+    # 6. Process Observed Results
+    rest_spectrum_array = np.arange(observed.shape[0])
+    
+    mask_observed_line1 = (rest_spectrum_array >= selector_observed.xmin1) & (rest_spectrum_array <= selector_observed.xmax1)
+    lc_observed_line1 = lc_core(observed, np.where(mask_observed_line1)[0][0], np.where(mask_observed_line1)[0][-1]+1, 10)
+    central_wavelength_observed_line1 = rest_spectrum_array[int(lc_observed_line1[0])]
+    
+    mask_observed_line2 = (rest_spectrum_array >= selector_observed.xmin2) & (rest_spectrum_array <= selector_observed.xmax2)
+    lc_observed_line2 = lc_core(observed, np.where(mask_observed_line2)[0][0], np.where(mask_observed_line2)[0][-1]+1, 10)
+    central_wavelength_observed_line2 = rest_spectrum_array[int(lc_observed_line2[0])]
+    
+    central_wavelength_observed = (central_wavelength_observed_line1, central_wavelength_observed_line2)
+    
+    return central_wavelengths_atlas, central_wavelength_observed
+
 def main():
     #Add the description of the code and the steps to follow.
     #Printed at the beginning of the code to inform the user about the steps to follow
@@ -349,7 +444,8 @@ def main():
     print("4. Select the range of the observed data to be calibrated and get the central wavelength of the observed data range.")
     print("5. Compute the linear transformation to calibrate the wavelength axis of the observed data using the central wavelengths of the selected spectral lines in the reference atlas and the central wavelengths of the selected spectral lines in the observed data.")
     print("6. Apply the linear transformation to the wavelength axis of the observed data.")
-    print("7. Create a full cube of the wavelength-calibrated observed data and save it as a new fits file.")   
+    print("7. Create a full cube of the wavelength-calibrated observed data and save it as a new fits file.")
+    print("If there is a regular expression used as input, all the files fulfiling such an expression will be calibrated accordingly")   
 
     #Load the solar and telluric reference atlas .npy files
     # From https://zenodo.org/records/14674504 Solar and Telluric spectra for wavelength calibration
@@ -364,11 +460,16 @@ def main():
     solar_atlas_v2 = np.array([solar_atlas_v2_pd['wavelength[A]'].values*0.1, solar_atlas_v2_pd['y_final_norm'].values])
 
     #load the name of the observed Stokes data file to be calibrated
-    observed_stokes_file = input("Enter the name of the observed Stokes data file to be calibrated (e.g., stokes_cam6.fits): ")
+    observed_stokes_file_list = input("Enter the name of the observed Stokes data file to be calibrated (e.g., stk.fits). For several use '*' as a regular expression: ")
+
+    list_raw_files = glob.glob(observed_stokes_file_list)
+    list_raw_files.sort()
+
+    observed_stokes_file = list_raw_files[0]
+    
     if not os.path.isfile(observed_stokes_file):
         print(f"Error: The file '{observed_stokes_file}' does not exist.")
         sys.exit(1)
-
 
     #Load the observed Stokes data and compute the rest spectrum as the average of the observed spectra and normalize it to the maximum value of the rest spectrum.
     #Load measured stokes and compute a rest spectra as the average of the observed spectra
@@ -379,11 +480,6 @@ def main():
     #Not all field of view should be use to calculate the rest spectrum, 
     # we should select a custom region visualy with the rectangle selector.
     img = stokes_cube[0].data[:, 0, :, 50]
-    #flat = stokes_cube[1].data
-    #flat_spect = np.mean(flat, axis=0)
-    #flat_spect = flat_spect / np.max(flat_spect)  # Normalize the flat field spectrum
-    #flat_spect = flat_spect[::-1]  # Flip the wavelength axis to match the reference atlas
-    
     selector = rectangle_selector(img)
     plt.show()
     ymin, ymax = int(selector.ymin), int(selector.ymax)
@@ -399,37 +495,26 @@ def main():
     central_wavelength = float(input("Enter the central wavelength of the observed data range to be calibrated (in nm): "))
     num_telluric_lines = int(input("Enter the number of telluric lines in the observed data range: "))
 
-    #with the central wavelenght, we define the range of the observed data to be calibrated around 0.6 nm of the central wavelength
+    #with the central wavelenght, we define the range of the observed data to be calibrated around 0.7 nm of the central wavelength
     observed_data_range = (central_wavelength - 0.35, central_wavelength + 0.35)
+
     solar_region_mask = (solar_atlas[0, :] >= observed_data_range[0]) & (solar_atlas[0, :] <= observed_data_range[1])
     solar_region_wavelengths = solar_atlas[0, solar_region_mask]
     solar_region_intensities = solar_atlas[1, solar_region_mask]
-
-    #check with the new solar_atlas_v2
-    print(f"Observed data range: {observed_data_range}")
-    solar_region_mask_v2 = (solar_atlas_v2[0, :] >= observed_data_range[0]) & (solar_atlas_v2[0, :] <= observed_data_range[1])
-    solar_region_wavelengths_v2 = solar_atlas_v2[0, solar_region_mask_v2]
-    solar_region_intensities_v2 = solar_atlas_v2[1, solar_region_mask_v2]
-
-    #plt.figure()
-    #plt.plot(solar_region_wavelengths, solar_region_intensities, label='Solar Atlas')
-    #plt.plot(solar_region_wavelengths_v2, solar_region_intensities_v2, label='Solar Atlas v2')
-    #plt.xlabel('Wavelength (nm)')
-    #plt.ylabel('Intensity')
-    #plt.title('Solar Atlas Comparison')
-    #plt.legend()
-    #plt.show()
-
-    #for the telluric reference atlas, we will use the wavelength range of the observed data range.
     telluric_region_mask = (telluric_atlas[0, :] >= observed_data_range[0]) & (telluric_atlas[0, :] <= observed_data_range[1])
     telluric_region_wavelengths = telluric_atlas[0, telluric_region_mask]
     telluric_region_intensities = telluric_atlas[1, telluric_region_mask]
 
-    #Fourth, we call the wavelength_range_selection function to get the central wavelengths of the selected spectral lines.
-    central_wavelengths_atlas = wavelength_range_selection_atlas(solar_region_wavelengths, solar_region_intensities, telluric_region_wavelengths, telluric_region_intensities, num_telluric_lines)
+    #Fourth, we call the wavelength_range_selection function to get the central wavelengths of the selected spectral lines in atlas and observed data
+    central_wavelengths_atlas, central_wavelengths_observed = wavelength_range_selection_simultaneous(solar_region_wavelengths, 
+                                                                                                      solar_region_intensities, 
+                                                                                                      telluric_region_wavelengths, 
+                                                                                                      telluric_region_intensities,
+                                                                                                      num_telluric_lines,
+                                                                                                      rest_spectrum)
 
-    #Fifth, we ask the user to select the range of the observed data to be calibrated and get the central wavelength of the observed data range.
-    central_wavelengths_observed = wavelength_range_selection_observed(rest_spectrum)
+    print(central_wavelengths_atlas)
+    print(central_wavelengths_observed)
 
     #Sixth, we compute the linear transformation to calibrate the wavelength axis of the observed data using the central wavelengths of the selected spectral lines in the reference atlas and the central wavelengths of the selected spectral lines in the observed data.
     #We will use the two central wavelengths of the selected spectral lines in the reference atlas and the two central wavelengths of the selected spectral lines in the observed data to compute the linear transformation.
@@ -449,7 +534,6 @@ def main():
     # the wavelength-calibrated observed data with the solar and telluric reference atlas.
     fig, ax = plt.subplots(nrows= 1, ncols=1, sharex=True, figsize=(10, 8))
     ax.plot(wavelength_calibrated, rest_spectrum, color='red', label='Wavelength-Calibrated Observed Data')
-    #ax.plot(wavelength_calibrated, flat_spect, color='black', linestyle='--', label='Wavelength-Calibrated Grand Flat Data')
     ax.plot(solar_region_wavelengths, solar_region_intensities, color='blue', linestyle='--', label='Solar Reference Atlas')
     ax.plot(telluric_region_wavelengths, telluric_region_intensities, color='green', linestyle='--', label='Telluric Reference Atlas')
     ax.set_title("Wavelength-Calibrated Observed Data - Comparison with Solar and Telluric Reference Atlas")
@@ -459,103 +543,64 @@ def main():
     plt.tight_layout()
     plt.show()
 
-
-    #Test to rid out of the telluric lines from the wavelength-calibrated observed data.
-    #First, we need to equaly sample the telluric reference atlas to match the wavelength grid of the observed data.
-    
-    #telluric_interpolator = interp1d(telluric_region_wavelengths, telluric_region_intensities, kind='linear', bounds_error=False, fill_value="extrapolate")
-    #telluric_region_intensities_resampled = telluric_interpolator(wavelength_calibrated)
-    #
-    ##use the widen_multiple_lines function to stretch the telluric lines
-    #telluric_region_intensities_stretched = widen_multiple_lines(wavelength_calibrated, telluric_region_intensities_resampled, central_wavelengths_atlas, stretch_factor=1.65, window_size=0.03)
-#
-    #rest_spectrum_corrected = rest_spectrum - (telluric_region_intensities_stretched - 1)
-    ##plot the corrected spectrum to check the result
-    #fig, ax = plt.subplots(nrows= 1, ncols=1, sharex=True, figsize=(10, 8))
-    #ax.plot(wavelength_calibrated, rest_spectrum_corrected, color='red', label='Telluric-Corrected Observed Data')
-    #ax.set_title("Telluric-Corrected Observed Data")
-    #ax.set_xlabel("Wavelength (nm)")
-    #ax.set_ylabel("Intensity")
-    #ax.legend()
-    #plt.tight_layout()
-    #plt.show()
-
-
-
     #the final step is to create a full cube of the wavelength-calibrated observed data and save it as a new fits file. 
     #The new fits file will have a shape of [stokes, y (spatial dimension), x(scans), wavelength] including the new scale of calibrated wavelengths and it will have the same header as the original observed data file, but with the updated wavelength axis.
     #Remember: [scans, stokes, y, x]
     #We also add a binning of the wavelenght to avoid oversampling and reduce the data size.
-    scans, stokes, y, wavelenght = stokes_cube[0].data.shape
-    print(f"Original Stokes cube shape: {stokes_cube[0].data.shape}")
+    #Include the list of files in case of a regular expression as input
 
-    if wavelenght % 2 != 0:
-        print("Odd number of wavelength pixels, reducing by 1.")
-        wavelenght -= 1
-        wavelength_calibrated = wavelength_calibrated[:-1]
-
+    #Depending of the camera spatial resolution, you will be interested in in binning in the spectral dimension - this is usualy the case for the Zylas cameras.
     binned_cond = input("Do you want binning of the spectral sampling? (yes/no)").strip().lower()
-    
-    if binned_cond == 'yes':
-        wavelenght_binned = wavelenght // 2  # update the wavelength dimension after binning
-        wavelength_calibrated = wavelength_calibrated.reshape(wavelenght_binned, 2).mean(axis=1) 
-    elif binned_cond == 'no':
-        wavelenght_binned = wavelenght
 
-    wavelength_calibrated_cube = np.zeros_like(np.zeros([stokes, y, scans, wavelenght_binned]), dtype=np.float32)
-    for i in range(scans):
-        for j in range(stokes):
-            #normalize the data to the maximum value of the rest spectrum
-            stokes_cube[0].data[i, j, :, :] /= rest_spectrum_max
-            #apply the binning to the wavelength axis with mean as operation
-            if binned_cond == 'yes':
-                wavelength_calibrated_cube[j, :, i, :] = stokes_cube[0].data[i, j, :, :wavelenght].reshape(y, wavelenght_binned, 2).mean(axis=2) 
-            elif binned_cond == 'no':
-                wavelength_calibrated_cube[j, :, i, :] = stokes_cube[0].data[i, j, :, :wavelenght]
+    print('Calibrating files ...')
+    for f in list_raw_files:
+        print(f)
+        stokes_cube = fits.open(f)
+        scans, stokes, y, wavelenght = stokes_cube[0].data.shape
+        print(f"Original Stokes cube shape: {stokes_cube[0].data.shape}")
 
-    #Check the new spectral resolution of the wavelength-calibrated observed data.
-    spectral_resolution_observed_binned = 10000 * ((wavelength_calibrated[1] - wavelength_calibrated[0]))
-    print("Spectral resolution of the binned wavelength-calibrated observed data:", spectral_resolution_observed_binned, "mA")  
+        if wavelenght % 2 != 0:
+            print("Odd number of wavelength pixels, reducing by 1.")
+            wavelenght -= 1
+            wavelength_calibrated = wavelength_calibrated[:-1]
+        
+        if binned_cond == 'yes':
+            wavelenght_binned = wavelenght // 2  # update the wavelength dimension after binning
+            wavelength_calibrated = wavelength_calibrated.reshape(wavelenght_binned, 2).mean(axis=1) 
+        elif binned_cond == 'no':
+            wavelenght_binned = wavelenght
 
-    print('Final wavelength-calibrated cube shape:', wavelength_calibrated_cube.shape)
+        wavelength_calibrated_cube = np.zeros_like(np.zeros([stokes, y, scans, wavelenght_binned]), dtype=np.float32)
+        for i in range(scans):
+            for j in range(stokes):
+                #normalize the data to the maximum value of the rest spectrum
+                stokes_cube[0].data[i, j, :, :] /= rest_spectrum_max
+                #apply the binning to the wavelength axis with mean as operation
+                if binned_cond == 'yes':
+                    wavelength_calibrated_cube[j, :, i, :] = stokes_cube[0].data[i, j, :, :wavelenght].reshape(y, wavelenght_binned, 2).mean(axis=2) 
+                elif binned_cond == 'no':
+                    wavelength_calibrated_cube[j, :, i, :] = stokes_cube[0].data[i, j, :, :wavelenght]
 
-    #Invert the wavelength axis to ensure increasing order
-    wavelength_calibrated_cube = wavelength_calibrated_cube[:, :, :, ::-1]
+        #Check the new spectral resolution of the wavelength-calibrated observed data.
+        spectral_resolution_observed_binned = 10000 * ((wavelength_calibrated[1] - wavelength_calibrated[0]))
+        print("Spectral resolution of the binned wavelength-calibrated observed data:", spectral_resolution_observed_binned, "mA")  
 
-    ##Ask the user to select the wavelength for a plot of the wavelength-calibrated cube to check the results.
-    #wavelength_position = float(input("Enter the wavelength (in nm) to plot the wavelength-calibrated cube: "))
-    #wavelength_index = np.argmin(np.abs(wavelength_calibrated - wavelength_position))
-    #print(f"Wavelength index for {wavelength_position} nm:", wavelength_index)
-    #plt.figure(figsize=(10, 5))
-    #plt.imshow(wavelength_calibrated_cube[0, :, :, wavelength_index], aspect='auto', cmap='gray')
-    #plt.title(f"Wavelength-Calibrated Cube - First Stokes Parameter at {wavelength_position} nm")
-    #plt.xlabel("X (scans)")
-    #plt.ylabel("Y (spatial dimension)")
-    #plt.colorbar(label="Intensity")
-    #plt.show()
-#
-    #if wavelength_calibrated_cube.shape[0] > 1:
-    #    plt.figure(figsize=(10, 5))
-    #    plt.imshow(wavelength_calibrated_cube[3, :, :, wavelength_index], aspect='auto', cmap='gray')
-    #    plt.title(f"Wavelength-Calibrated Cube -  Stokes V Parameter at {wavelength_position} nm")
-    #    plt.xlabel("X (scans)")
-    #    plt.ylabel("Y (spatial dimension)")
-    #    plt.colorbar(label="Intensity")
-    #    plt.show()
-#
-    #Create a new fits file with the wavelength-calibrated observed data and save it with out replacing the original observed data file.
-    #Include as a extra hdu the new wavelength axis and the original header of the observed data file.
-    if ".fts" in observed_stokes_file:
-        new_fits_file = observed_stokes_file.replace(".fts", "_norm_wavelength_calibrated.fits")
-    else:
-        new_fits_file = observed_stokes_file.replace(".fts", "_norm_wavelength_calibrated.fits")
-    hdu = fits.PrimaryHDU(data=wavelength_calibrated_cube, header=stokes_cube[0].header)
-    hdul = fits.HDUList([hdu])
-    wavelength_hdu = fits.ImageHDU(data=wavelength_calibrated, header=stokes_cube[0].header)
-    hdul.append(wavelength_hdu)
-    hdul.writeto(new_fits_file, overwrite=True)
+        print('Final wavelength-calibrated cube shape:', wavelength_calibrated_cube.shape)
 
-
+        #Invert the wavelength axis to ensure increasing order
+        wavelength_calibrated_cube = wavelength_calibrated_cube[:, :, :, ::-1]
+#   
+        #Create a new fits file with the wavelength-calibrated observed data and save it with out replacing the original observed data file.
+        #Include as a extra hdu the new wavelength axis and the original header of the observed data file.
+        if ".fts" in f:
+            new_fits_file = f.replace(".fts", "_max_norm_wl_calibrated.fits")
+        else:
+            new_fits_file = f.replace(".fits", "max_norm_wl_calibrated.fits")
+        hdu = fits.PrimaryHDU(data=wavelength_calibrated_cube, header=stokes_cube[0].header)
+        hdul = fits.HDUList([hdu])
+        wavelength_hdu = fits.ImageHDU(data=wavelength_calibrated, header=stokes_cube[0].header)
+        hdul.append(wavelength_hdu)
+        hdul.writeto(new_fits_file, overwrite=True)
 
 if __name__ == "__main__":
     main()
