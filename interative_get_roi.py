@@ -75,9 +75,9 @@ def line_core_selector(f):
 
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.imshow(f, cmap='gray', origin='lower')
-    ax.set_title("BEAM straighten spectral lines:\nClick left button to range HORIZONAL edges of an spectral line core.\nClick button to range VERTICAL edges of an spectral line core\n Escape to reset. Close to finish.")
+    ax.set_title("BEAM straighten spectral lines:\nClick left button to range HORIZONAL edges of an spectral line core.\nClick right button to range VERTICAL edges of an spectral line core\n Escape to reset. Close to finish.")
     plt.draw()
-    print(">> Beam: Click left button to range HORIZONAL edges and Click button to range VERTICAL edges of an spectral line core")
+    print(">> Beam: Click left button to range HORIZONAL edges and Click right button to range VERTICAL edges of an spectral line core")
 
     def on_select_horizontal(xmin, xmax):
         r['c_wrg'] = [int(xmin), int(xmax)]
@@ -99,7 +99,7 @@ def line_core_selector(f):
             span_y.clear()
             
             # 3. Restaurar el título y refrescar el lienzo gráfico
-            ax.set_title("BEAM straighten spectral lines: Click left button to range HORIZONAL edges of an spectral line core.\nClick button to range VERTICAL edges of an spectral line core\nEscape to reset.")
+            ax.set_title("BEAM straighten spectral lines:\nClick left button to range HORIZONAL edges of an spectral line core.\nClick right button to range VERTICAL edges of an spectral line core\nEscape to reset.")
             fig.canvas.draw_idle()
             print("\n>> [RESET] Selection erased. Try again ...")
 
