@@ -21,8 +21,11 @@ First, run `python main_prep_MTR2_v2.py` and follow the prompts to provide the n
 
 ![Beam straighten spectral lines: Vertical range](README_img/Fig1.png)
 ![Beam straighten spectral lines: Horizontal range](README_img/Fig2.png)
+![Clean ROI: Rectangle region](README_img/Fig3.png)
 
 In the polarimetry mode, the script computes the alignment and scale factor of both beams and extracts the final Stokes matrix result of the beam combination per scan. In the spectroscopy mode, the script computes the alignment and extracts a final Stokes I profile per scan.
+
+![Example of a Stokes profiles](README_img/Fig3_1.png)
 
 A new FITS file will be created, namely stk_*name of the original file*..fits, and saved in the save path. Use this FITS file for the next calibration step.
 
@@ -31,6 +34,8 @@ You can calibrate several files at once by providing a file path using '\*' as a
 ### 2. Wavelength calibration using reference atlas of solar and telluric spectral lines:
 
 Second, run `python wl_cal_v2.py` and follow the prompts to provide the FITS file created previously. This procedure performs a maximum-intensity normalisation and atlas wavelength calibration of the scans. First, select a region on the FOV to calculate the rest spectrum; choose a quiet Sun region. Then indicate the central spectral region of the data in nm, for example: 630.15 for scans of the iron line pair at 630.1 and 630.2 nm. Following, indicate the number of telluric lines to calibrate (max 2). If no telluric lines are in the observed spectral range, use two solar lines for calibration. Manually select the spectral range for each line (Telluric only, Solar/Telluric, or Solar only) in the pop-up windows. Close both windows to continue. A comparation plot will appear including the solar/telluric atlas and the calibrated-wavelength rest profile. Finally, you will be asked whether to bin in the spectral dimension. Typically, when recording spectra with Zyla cameras, select binning to achieve optimal spectral sampling.
+
+![Rest spectrum calculation](README_img/Fig4_1.png)
 
 A new FITS file will be created, namely stk_*name of the original file*__max_norm_wl_calibrated.fits, which you should use for checking.
 
