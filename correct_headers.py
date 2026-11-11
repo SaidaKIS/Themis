@@ -9,13 +9,13 @@ from astropy.wcs import WCS
 import os
 
 #Keyword to modify
-raw_file_sci_cam6 = "260522_observation_test/t014_b0606_sp_20260522_080309_b3.fts"
+raw_file_sci_cam6 = "/data-lts/260522/t014_b0606_sp_20260522_080309_b3.fts"
 data_hdu_cam6 = fits.open(raw_file_sci_cam6)
 data_hdr_cam6 = data_hdu_cam6[0].header
 stk_seq = data_hdr_cam6["SEQ_STOK"]
 
 # modification of a header camera 505 
-raw_file_sci_cam5 = "20290901_Bommier/t001_b0606_sp_20260901_073054_b3.fts"
+raw_file_sci_cam5 = "/home/themis/Documents/saida/300926/t020_b0505_sp_20260930_164020_b3.fts"
 
 #Checking and rewriting the headers
 
