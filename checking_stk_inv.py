@@ -1239,14 +1239,14 @@ if __name__ == "__main__":
             stk_data_obs = hdul_obs[0].data
             stk_data_wl_obs = hdul_obs[1].data
             stk_header = hdul_obs[0].header
-            hdul_inv = fits.open(file_name_inv)
+            hdul_inv = fits.open(list_inv_files[0])
             stk_data_inv = hdul_inv[1].data
             stk_data_wl_inv = hdul_inv[2].data
             checking_obs_inv=spect_inv_check(stk_data_obs, stk_header, file_name_obs, stk_data_inv, inv_models=hdul_inv[0].data)
             checking_obs_inv.set_parameters(stk_data_wl_obs*10, stk_data_wl_inv)
             checking_obs_inv.inspect(chi=False)
             #checking_obs_inv.chi_calculation_specific(line=6302.5, width=0.4)
-            checking_obs_inv.check_infered_model()
+            checking_obs_inv.check_infered_model(Bl_lims=[-200,200], Bt_lims=[200,0], vlos_lims=[-4,4])
         else:
             checking_obs_inv=spect_inv_check_files(list_obs_files, list_inv_files, list_obs_files[0])
             checking_obs_inv.set_parameters()

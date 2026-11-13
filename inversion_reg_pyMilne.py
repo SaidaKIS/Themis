@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import glob
 import sys
 import os
-sys.path.append("../../pyMilne")
+sys.path.append("../pyMilne")
 import MilneEddington as ME
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from astropy.coordinates import SkyCoord
@@ -39,22 +39,27 @@ def process_fits_cube(fits_path, out_path, wavelength, lines,
                       N_WORKERS=1, mu=1.0, initial_guess=None, psf=None):
 
     invertible_lines = {6301: 6301.4995, 6302: 6302.4931, 5247: 5247.0501, 5250: 5250.2086}
-    spectral_width = {6301: 0.6, 6302: 0.4, }
+    spectral_width = {6301: 0.6, 6302: 0.4, 5247: 0.4, 5250: 0.4}
     
     with fits.open(fits_path, memmap=True) as hdul:
         data_cube = hdul[0].data  # Shape: (4, Ny, Nx, N_wvl)
+        stokes_dim, ny, nx, n_wvl = data_cube.shape
+        n_pixels = ny * nx
+        reshaped_stokes_full = np.transpose(data_cube, (1, 2, 0, 3)).astype(np.float32)
         
         if data_cube.ndim == 4:
-            stokes_dim, ny, nx, n_wvl = data_cube.shape
-            n_pixels = ny * nx
-            reshaped_stokes_full = np.transpose(data_cube, (1, 2, 0, 3)).astype(np.float32)
-            cw = invertible_lines[lines[0]]
-            w1 = cw - spectral_width[lines[0]]/2
-            w2 = cw + spectral_width[lines[0]]/2
-            indx1 = np.argmin(np.abs(wavelength - w1))
-            indx2 = np.argmin(np.abs(wavelength - w2))
-            reshaped_stokes = reshaped_stokes_full[:,:,:,indx1:indx2]
-            wavelength_line = wavelength[indx1:indx2]
+            if len(lines) == 2:
+                reshaped_stokes = reshaped_stokes_full
+                wavelength_line = wavelength
+                
+            elif len(lines) == 1:
+                cw = invertible_lines[lines[0]]
+                w1 = cw - spectral_width[lines[0]]/2
+                w2 = cw + spectral_width[lines[0]]/2
+                indx1 = np.argmin(np.abs(wavelength - w1))
+                indx2 = np.argmin(np.abs(wavelength - w2))
+                reshaped_stokes = reshaped_stokes_full[:,:,:,indx1:indx2]
+                wavelength_line = wavelength[indx1:indx2]
         else:
             raise ValueError(f"Expected 4D array (Stokes, Y, X, Lambda), got {data_cube.ndim}D")
 
@@ -71,6 +76,8 @@ def process_fits_cube(fits_path, out_path, wavelength, lines,
         me_inverter = ME.MilneEddington(
                 regions=regions_config,
                 lines=lines,
+                anomalous=True, 
+                dw_lines = 25,
                 nthreads=N_WORKERS,          # ProcessPoolExecutor handles multi-core batching
                 precision='float32'
             )
@@ -109,7 +116,7 @@ def process_fits_cube(fits_path, out_path, wavelength, lines,
 if __name__ == "__main__":
     INPUT_FITS = input("Enter path to input FITS file: ")
     OUTPUT_FITS = input("Enter path to output FITS file: ")
-    LINES_IN = input("Enter spectral line to invert (e.g., 6301, 6302, 5247, 5250): ")
+    LINES_IN = input("Enter spectral line or lines to invert (e.g., 6301, 6302, 5247, 5250): ")
     LINES = [int(line.strip()) for line in LINES_IN.split(',')]
 
     HEADER = fits.open(INPUT_FITS)[1].header
